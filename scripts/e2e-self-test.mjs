@@ -138,7 +138,11 @@ async function main() {
   ok("守护进程消费请求并写回计划板", consumed, `条目数=${entries.length}`);
   ok("写回条目带类型标签", entries.some((t) => /^【/.test(t)), entries[0] ? entries[0].slice(0, 40) : "(空)");
 
-  const reqAfter = await cdp.eval(`localStorage.getItem(${JSON.stringify(REQ_KEY)})`);
+  let reqAfter = await cdp.eval(`localStorage.getItem(${JSON.stringify(REQ_KEY)})`);
+  for (let i = 0; i < 20 && reqAfter; i++) {
+    await sleep(500);
+    reqAfter = await cdp.eval(`localStorage.getItem(${JSON.stringify(REQ_KEY)})`);
+  }
   ok("请求标志已被消费（清除）", !reqAfter);
 
   // --- 7. 倒计时已排定 ---
