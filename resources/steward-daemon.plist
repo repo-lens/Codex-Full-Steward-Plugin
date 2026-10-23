@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>codex.guardian.steward</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node</string>
+    <string>__SCRIPTS_DIR__/steward-daemon.mjs</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/tmp/steward-daemon.stdout.log</string>
+  <key>StandardErrorPath</key><string>/tmp/steward-daemon.stderr.log</string>
+  <key>WorkingDirectory</key><string>__REPO_DIR__</string>
+</dict>
+</plist>

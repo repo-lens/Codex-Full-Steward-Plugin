@@ -1,0 +1,9 @@
+.DS_Store
+node_modules/
+.worktrees/
+outputs/guardian-tests/
+*.log
+
+# 运行时缓存（会话上下文）
+.guardian/
+resources/cert/*.key
