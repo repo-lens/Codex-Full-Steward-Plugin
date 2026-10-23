@@ -44,13 +44,14 @@ $NODE --check scripts/steward-daemon.mjs
 
 ## Configure
 
-1. Open the Guardian panel.
+1. Open the Full Steward panel from the **管家** pill.
 2. Set **项目目录** to the absolute project path.
 3. Select a Provider and enter a model.
 4. Enter an API key and click **保存**.
 5. Confirm the Keychain status becomes configured.
 6. Optionally enable and configure a fallback Provider/model.
-7. Enable **管家模式**.
+7. Enable **管家模式**. It is the primary review and planning surface.
+8. Configure the plan board only after steward mode is working; 429 recovery is optional.
 
 Ollama profiles may run without an API key when using the local OpenAI-compatible endpoint.
 

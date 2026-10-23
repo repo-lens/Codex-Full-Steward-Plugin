@@ -2,11 +2,13 @@
 
 ## Start
 
-1. Open the guardian panel from the pill.
+1. Open the Full Steward panel from the **管家** pill.
 2. Set the project root.
 3. Configure the primary model and optional fallback model.
 4. Enable the steward.
 5. Choose a review focus.
+
+Product order: steward review first, plan-board execution second, optional 429 recovery last.
 
 ## Movable Panel
 

@@ -146,17 +146,17 @@ def make_horizontal():
     draw = ImageDraw.Draw(image, "RGBA")
 
     rounded(draw, (40, 36, 1240, 604), 24, fill=None, outline="#21445c", width=1)
-    text(draw, (76, 64), "CODEX DESKTOP STEWARD", 14, "demi", COLORS["cyan"])
+    text(draw, (76, 64), "STEWARD-FIRST CODEX WORKFLOW", 14, "demi", COLORS["cyan"])
     text(draw, (76, 104), "Codex Full", 64, "bold")
     text(draw, (76, 172), "Steward Plugin", 64, "bold")
     text(draw, (78, 258), "Review. Decide. Plan. Deliver.", 25, "demi", COLORS["blue"])
-    text(draw, (78, 307), "让 Codex 从完成任务到交付成果，", 20, "regular", COLORS["white"], cjk=True)
-    text(draw, (78, 340), "全程有标准、有依据、有闭环。", 20, "regular", COLORS["white"], cjk=True)
+    text(draw, (78, 307), "管家先判断方向，计划板再把下一步变成行动。", 20, "regular", COLORS["white"], cjk=True)
+    text(draw, (78, 340), "429 自动恢复只是可选保险，不定义产品。", 20, "regular", COLORS["white"], cjk=True)
 
-    pill(draw, 78, 398, "Quality Gates", COLORS["cyan"])
-    pill(draw, 218, 398, "Model Fallback", COLORS["blue"])
-    pill(draw, 376, 398, "Plan Execution", COLORS["amber"])
-    pill(draw, 534, 398, "Verified Delivery", COLORS["green"])
+    pill(draw, 78, 398, "Steward Review", COLORS["cyan"])
+    pill(draw, 214, 398, "Next-Step Plan", COLORS["blue"])
+    pill(draw, 365, 398, "Plan Execution", COLORS["amber"])
+    pill(draw, 514, 398, "Verified Delivery", COLORS["green"])
 
     rounded(draw, (78, 458, 670, 560), 14, fill="#09151f", outline="#1e4057", width=1)
     text(draw, (98, 476), " POLICY ENGINE ", 11, "demi", COLORS["muted"])
@@ -164,7 +164,7 @@ def make_horizontal():
     text(draw, (78, 578), "Built By Yang YiZhu", 13, "medium", COLORS["muted"])
 
     # Right-side product panel and HUD rings
-    paste_screenshot(image, 510, 910, 86, COLORS["cyan"])
+    paste_screenshot(image, 510, 810, 86, COLORS["cyan"])
     draw.arc((px(842), px(38), px(1260), px(456)), 190, 350, fill=rgba(COLORS["cyan"], 120), width=px(2))
     draw.arc((px(880), px(20), px(1260), px(400)), 200, 330, fill=rgba(COLORS["amber"], 90), width=px(1))
     for x, y, color in [(846, 102, COLORS["cyan"]), (1220, 98, COLORS["amber"]), (858, 520, COLORS["blue"])]:
@@ -185,7 +185,7 @@ def make_vertical():
     draw = ImageDraw.Draw(image, "RGBA")
 
     rounded(draw, (48, 48, 1032, 1392), 28, fill=None, outline="#21445c", width=1)
-    text(draw, (82, 82), "FULL STEWARD / V2.0.0", 15, "demi", COLORS["cyan"])
+    text(draw, (82, 82), "FULL STEWARD / V2.0.1", 15, "demi", COLORS["cyan"])
     text(draw, (82, 130), "Codex Full", 84, "bold")
     text(draw, (82, 222), "Steward", 84, "bold")
     text(draw, (82, 314), "Plugin", 84, "bold")
@@ -209,7 +209,7 @@ def make_vertical():
             draw.line((px(122), px(y + 112), px(122), px(y + 150)), fill=rgba(COLORS["line"]), width=px(2))
         y += 150
 
-    paste_screenshot(image, 860, 574, 538, COLORS["cyan"])
+    paste_screenshot(image, 620, 535, 610, COLORS["cyan"])
     draw.arc((px(460), px(430), px(1030), px(1000)), 180, 350, fill=rgba(COLORS["cyan"], 90), width=px(2))
     text(draw, (82, 1200), "Quality Gates · Model Fallback", 18, "demi", COLORS["white"])
     text(draw, (82, 1232), "Plan Execution · Verified Delivery", 18, "demi", COLORS["white"])

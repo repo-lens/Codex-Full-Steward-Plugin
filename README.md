@@ -4,9 +4,9 @@
 >
 > A local-first AI task steward for Codex desktop: quality gates, model fallback, plan execution, verified delivery, conservative cleanup, and unattended review.
 
-[![Version](https://img.shields.io/badge/version-2.0.0-58c4dd)](#)
+[![Version](https://img.shields.io/badge/version-2.0.1-58c4dd)](#)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%2B%20Codex-7bd88f)](#)
-[![Tests](https://img.shields.io/badge/tests-138%20passing-7bd88f)](#verification)
+[![Tests](https://img.shields.io/badge/tests-140%20passing-7bd88f)](#verification)
 [![License](https://img.shields.io/badge/license-MIT-f2c94c)](LICENSE)
 
 ![Codex Full Steward Plugin](assets/poster-horizontal.png)
@@ -37,6 +37,12 @@ Task completes
   -> delivery becomes available only after quality and backup gates pass
   -> user confirms twice; backup is verified; only safe runtime files move to Trash
 ```
+
+## Product Priority
+
+1. **管家模式 is the primary product surface.** It reads the completed task, forms a project-level judgment, identifies real gaps, and produces the next executable decision.
+2. **计划板 is the execution surface.** It receives only clean, evidence-grounded instructions and turns them into the next Codex task after the current result is complete.
+3. **429 recovery is an optional resilience layer.** It sits folded at the bottom and never defines the product.
 
 ![Steward panel](assets/guardian-ui.png)
 
@@ -75,9 +81,9 @@ Task completes
 - Two-step confirmation.
 - ZIP, `MANIFEST.json`, `SHA256SUMS`, and delivery README.
 - Project fingerprint check aborts delivery if files change during backup.
-- Conservative cleanup moves only Guardian runtime caches and temporary files to Trash.
+- Conservative cleanup moves only steward runtime caches and temporary files to Trash.
 
-### 429 Recovery
+### Optional 429 Recovery
 
 - Detects localized 429/reconnect states.
 - Waits, clicks the explicit retry control, and verifies task recovery.
@@ -110,7 +116,7 @@ Then open Codex, reload the window, and enable the required switches in the pane
 
 ## Quick Start
 
-1. Open the Guardian panel.
+1. Open the Full Steward panel from the **管家** pill.
 2. Set the project root.
 3. Choose a Provider and model.
 4. Save the API key to macOS Keychain.
@@ -194,7 +200,7 @@ Read the source-backed comparison: [COMPETITIVE-ANALYSIS.md](COMPETITIVE-ANALYSI
 
 ## Verification
 
-- Unit tests: **138/138**
+- Unit tests: **140/140**
 - Real CDP E2E: **10/10**
 - Functional and strategy round: **10/10**
 - Safety and delivery round: **10/10**

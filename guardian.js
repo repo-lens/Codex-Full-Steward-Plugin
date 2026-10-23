@@ -1,5 +1,5 @@
 /*
- * Codex++ user script: Codex 429 Guardian
+ * Codex++ user script: Codex Full Steward
  *
  * Watches the current Codex thread for the localized 429/server-overloaded
  * state. After the selected delay it clicks the explicit retry button once.
@@ -9,8 +9,10 @@
 (() => {
   "use strict";
 
-  const VERSION = "2.0.0";
+  const VERSION = "2.0.1";
   const PRODUCT_NAME = "Codex Full Steward Plugin";
+  const PRODUCT_TITLE = "Codex Full Steward";
+  const PANEL_SECTION_ORDER = Object.freeze(["steward", "plan", "r429"]);
   const ATTRIBUTION = "Built By Yang YiZhu";
   // steward 解析重试上限（轮询次数）：超过后把「人工审核」条目写进计划板并复位，避免无限挂起
   const STEWARD_PARSE_MAX_RETRIES = 60;
@@ -870,6 +872,7 @@
       maxConsecBtn: "[data-max-consecutive]",
       background: ".g429-background",
       planEnabled: ".g429-plan-enabled",
+      planSection: '[data-section="plan"]',
       planBody: ".g429-plan-body",
       planText: ".g429-plan-text",
       planAdd: ".g429-plan-add",
@@ -895,6 +898,7 @@
       deliveryExecute: ".g429-delivery-execute",
       deliveryCancel: ".g429-delivery-cancel",
       steward: ".g429-steward",
+      stewardSection: '[data-section="steward"]',
       stewardBody: ".g429-steward-body",
       stewardMode: ".g429-steward-mode",
       stewardTimeout: ".g429-steward-timeout",
@@ -972,6 +976,15 @@
     };
   }
 
+  function panelBranding() {
+    return {
+      title: PRODUCT_TITLE,
+      panelAriaLabel: `${PRODUCT_TITLE} 管家面板`,
+      pillLabel: "管家",
+      pillTitle: "打开管家面板",
+    };
+  }
+
   const core = {
     isLegacyV1,
     prunePlanThreads,
@@ -980,6 +993,10 @@
     isResultComplete,
     computeSessionKey,
     MIN_RESULT_CHARS,
+    PRODUCT_NAME,
+    PRODUCT_TITLE,
+    PANEL_SECTION_ORDER,
+    panelBranding,
     SELECTORS,
     fingerprintThreadId,
     preferredPlanThreadId,
@@ -1145,7 +1162,7 @@
         return;
       }
     } catch (_) {}
-    console.info("[Codex 429 Guardian]", message);
+    console.info("[Codex Full Steward]", message);
   }
 
   function selectedThreadId() {
@@ -1614,8 +1631,18 @@
         gap: 10px;
       }
       [${HOST_ATTR}] .g429-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         font-weight: 650;
         letter-spacing: 0;
+      }
+      [${HOST_ATTR}] .g429-version-tag {
+        flex: 0 0 auto;
+        color: #7f8b98;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
       }
       [${HOST_ATTR}] .g429-task {
         display: flex;
@@ -1784,6 +1811,17 @@
         border-top: 0;
         padding-top: 0;
         margin-top: 10px;
+      }
+      [${HOST_ATTR}] .g429-group-hero {
+        margin-top: 10px;
+        padding: 8px;
+        border: 1px solid rgba(106,159,216,.20);
+        border-radius: 8px;
+        background: rgba(58,95,138,.10);
+      }
+      [${HOST_ATTR}] .g429-group-hero > .g429-group-head > .g429-group-name {
+        color: #f4f8fc;
+        font-size: 13px;
       }
       [${HOST_ATTR}] .g429-log-list > div {
         padding: 3px 0;
@@ -2235,24 +2273,25 @@
   installStyles();
 
   const host = document.createElement("div");
+  const branding = panelBranding();
   host.setAttribute(HOST_ATTR, VERSION);
   host.dataset.open = "false";
   host.dataset.phase = runtime.phase;
   host.dataset.enabled = String(runtime.settings.enabled);
   host.dataset.taskStatus = runtime.taskStatus;
   host.innerHTML = `
-    <div class="g429-panel" role="dialog" aria-label="429 守护设置">
+    <div class="g429-panel" role="dialog" aria-label="${branding.panelAriaLabel}">
       <div class="g429-head">
-        <span class="g429-title">Codex Guardian</span>
-        <span class="g429-version-tag">v2.0.0</span>
+        <span class="g429-title">${branding.title}</span>
+        <span class="g429-version-tag">v${VERSION}</span>
       </div>
       <div class="g429-task">
         <span class="g429-task-dot"></span>
         <span class="g429-task-text">等待任务</span>
       </div>
 
-      <!-- ===== v1.9.0 主区块：计划板（优先排版） ===== -->
-      <div class="g429-group g429-group-primary">
+      <!-- 计划板：第二主区块；运行时移动到管家模式之后 -->
+      <div class="g429-group g429-group-primary" data-section="plan">
         <button class="g429-group-head" data-collapse="plan" type="button" aria-expanded="true">
           <span class="g429-chev">▾</span><span class="g429-group-name">计划板</span>
           <span class="g429-group-badge" data-plan-badge>0/0</span>
@@ -2316,8 +2355,8 @@
         </div>
       </div>
 
-      <!-- ===== v1.9.0 主区块：管家模式（优先排版） ===== -->
-      <div class="g429-group g429-group-primary">
+      <!-- 管家模式：第一主区块；运行时移动到计划板之前 -->
+      <div class="g429-group g429-group-primary g429-group-hero" data-section="steward">
         <button class="g429-group-head" data-collapse="steward" type="button" aria-expanded="true">
           <span class="g429-chev">▾</span><span class="g429-group-name">管家模式</span>
           <span class="g429-group-badge" data-steward-badge>关</span>
@@ -2453,7 +2492,7 @@
       </div>
 
       <!-- ===== 次要区块：429 自动恢复（默认折叠） ===== -->
-      <div class="g429-group">
+      <div class="g429-group" data-section="r429">
         <button class="g429-group-head" data-collapse="r429" type="button" aria-expanded="false">
           <span class="g429-chev">▸</span><span class="g429-group-name">429 自动恢复</span>
           <span class="g429-group-badge" data-429-badge>开</span>
@@ -2491,7 +2530,7 @@
         <button class="g429-panel-reset-position" type="button" title="恢复默认右下角位置" style="appearance:none;border:1px solid rgba(255,255,255,.1);background:transparent;color:#8b98a8;border-radius:5px;padding:2px 6px;font:inherit;cursor:pointer">复位位置</button>
       </div>
       <div class="g429-row g429-foot">
-        <span class="g429-action">轻量监听中</span>
+        <span class="g429-action">管家待命</span>
         <button class="g429-steward-launcher" type="button" title="打开管家窗口（LLM 直连）">打开管家窗口</button>
         <button class="g429-close" type="button" title="收起" aria-label="收起">×</button>
       </div>
@@ -2533,9 +2572,9 @@
           style="height:34px;padding:0 12px;border-radius:6px;border:1px solid rgba(76,154,255,.5);background:linear-gradient(180deg,#3a5f8a 0%,#2a4a70 100%);color:#eaf3ff;cursor:pointer;font:inherit;font-size:11px;white-space:nowrap;">发送</button>
       </div>
     </div>
-    <div class="g429-pill" role="button" tabindex="0" title="打开 429 守护">
+    <div class="g429-pill" role="button" tabindex="0" title="${branding.pillTitle}">
       <span class="g429-dot"></span>
-      <span class="g429-label">429 守护</span>
+      <span class="g429-label">${branding.pillLabel}</span>
     </div>
     <div class="g429-delivery-modal" role="dialog" aria-label="交付确认" hidden
       style="position:fixed;inset:10% 50% auto auto;transform:translateX(50%);z-index:2147483647;width:min(620px,calc(100vw - 40px));max-height:80vh;overflow:auto;background:#141c26;border:1px solid rgba(255,255,255,.16);border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.58);padding:14px;color:#dce6f1;">
@@ -2549,6 +2588,12 @@
     </div>
   `;
   document.body.appendChild(host);
+
+  const planSection = host.querySelector(SELECTORS.ui.planSection);
+  const stewardSection = host.querySelector(SELECTORS.ui.stewardSection);
+  if (planSection && stewardSection) {
+    stewardSection.parentNode.insertBefore(stewardSection, planSection);
+  }
 
   const pill = host.querySelector(SELECTORS.ui.pill);
   const panel = host.querySelector(SELECTORS.ui.panel);
@@ -3859,7 +3904,7 @@
     host.dataset.enabled = String(runtime.settings.enabled);
     host.dataset.taskStatus = runtime.taskStatus;
     taskTextNode.textContent = taskStatusLabel(runtime.taskStatus);
-    pill.title = `${taskStatusLabel(runtime.taskStatus)} · 打开 429 守护`;
+    pill.title = `${taskStatusLabel(runtime.taskStatus)} · ${branding.pillTitle}`;
     enabledInput.checked = runtime.settings.enabled;
     backgroundInput.checked = runtime.settings.background;
     backgroundInput.checked = runtime.settings.background;
@@ -3964,9 +4009,9 @@
     }
 
     if (!runtime.settings.enabled) {
-      statusNode.textContent = "已暂停";
-      labelNode.textContent = "429 已暂停";
-      actionNode.textContent = "不会自动重试";
+      statusNode.textContent = "429 自动恢复已关闭";
+      labelNode.textContent = branding.pillLabel;
+      actionNode.textContent = "管家待命";
       return;
     }
 
@@ -4013,8 +4058,8 @@
     }
 
     statusNode.textContent = "等待 429";
-    labelNode.textContent = taskStatusLabel(runtime.taskStatus);
-    actionNode.textContent = "轻量监听中";
+    labelNode.textContent = branding.pillLabel;
+    actionNode.textContent = "管家待命";
     updateSwitchUI();
   }
 
