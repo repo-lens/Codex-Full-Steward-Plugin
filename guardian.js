@@ -9,7 +9,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "2.0.1";
+  const VERSION = "2.0.2";
   const PRODUCT_NAME = "Codex Full Steward Plugin";
   const PRODUCT_TITLE = "Codex Full Steward";
   const PANEL_SECTION_ORDER = Object.freeze(["steward", "plan", "r429"]);

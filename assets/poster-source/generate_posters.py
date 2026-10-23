@@ -164,9 +164,9 @@ def make_horizontal():
     text(draw, (78, 578), "Built By Yang YiZhu", 13, "medium", COLORS["muted"])
 
     # Right-side product panel and HUD rings
-    paste_screenshot(image, 510, 810, 86, COLORS["cyan"])
     draw.arc((px(842), px(38), px(1260), px(456)), 190, 350, fill=rgba(COLORS["cyan"], 120), width=px(2))
     draw.arc((px(880), px(20), px(1260), px(400)), 200, 330, fill=rgba(COLORS["amber"], 90), width=px(1))
+    paste_screenshot(image, 510, 810, 86, COLORS["cyan"])
     for x, y, color in [(846, 102, COLORS["cyan"]), (1220, 98, COLORS["amber"]), (858, 520, COLORS["blue"])]:
         draw.ellipse((px(x - 4), px(y - 4), px(x + 4), px(y + 4)), fill=rgba(color, 190))
 
@@ -185,7 +185,7 @@ def make_vertical():
     draw = ImageDraw.Draw(image, "RGBA")
 
     rounded(draw, (48, 48, 1032, 1392), 28, fill=None, outline="#21445c", width=1)
-    text(draw, (82, 82), "FULL STEWARD / V2.0.1", 15, "demi", COLORS["cyan"])
+    text(draw, (82, 82), "FULL STEWARD / V2.0.2", 15, "demi", COLORS["cyan"])
     text(draw, (82, 130), "Codex Full", 84, "bold")
     text(draw, (82, 222), "Steward", 84, "bold")
     text(draw, (82, 314), "Plugin", 84, "bold")
