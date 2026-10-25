@@ -9,7 +9,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "2.0.2";
+  const VERSION = "2.1.0";
   const PRODUCT_NAME = "Codex Full Steward Plugin";
   const PRODUCT_TITLE = "Codex Full Steward";
   const PANEL_SECTION_ORDER = Object.freeze(["steward", "plan", "r429"]);
@@ -27,6 +27,7 @@
   const MAX_WAIT_AFTER_DUE_MS = 10 * 60 * 1000;
   // 后台守护：未打开的会话也能倒计时 + 切回前台触发；默认开
   const BACKGROUND_KEY = "codex429Guardian.background.v1";
+  const STEWARD_BOOTSTRAP_KEY = "codex429Guardian.stewardBootstrap.v1";
   const BG_MAX_THREADS = 12;
 
 
@@ -436,17 +437,13 @@
     const id = threadId || "default";
     if (threads && threads[id]) {
       const own = normalizePlanSettings(threads[id]);
-      // 当前会话有自己独立的计划段就直接用；否则回退到 default 桶（共享计划），
-      // 避免"每个会话各有一个空桶"导致用户在 default 填的计划永远驱动不了新会话。
-      if (own.entries && own.entries.length) return own;
-      if (threads["default"]) return normalizePlanSettings(threads["default"]);
       return own;
     }
-    if (threads && threads["default"]) return normalizePlanSettings(threads["default"]);
+    if (id === "default" && threads && threads["default"]) return normalizePlanSettings(threads["default"]);
     return normalizePlanSettings(null);
   }
 
-  // 清理已不再引用的线程：只保留当前 activeThread 与 default，避免无界增长
+  // 保留多个会话的独立计划桶（最多 20 个），避免切换会话时把其他计划丢掉。
   // 只保留「值是线程计划态」的键；v1 遗留的字段键(enabled/entries/index/threadId/delaySeconds)会被丢掉
   function prunePlanThreads(threads, activeThreadId) {
     if (!threads || typeof threads !== "object") return {};
@@ -457,10 +454,14 @@
       const v = threads[key];
       // 线程计划态：对象且带 entries 数组；default 桶也接受
       const isThreadPlan = v && typeof v === "object" && !Array.isArray(v) && Array.isArray(v.entries);
-      if (key === "default" && isThreadPlan) keep[key] = v;
-      else if (key === activeThreadId && isThreadPlan) keep[key] = v;
+      if (isThreadPlan) keep[key] = v;
     }
-    return keep;
+    const keys = Object.keys(keep);
+    if (keys.length <= 20) return keep;
+    const retained = new Set(keys.slice(-20));
+    if (keep.default) retained.add("default");
+    if (activeThreadId && keep[activeThreadId]) retained.add(activeThreadId);
+    return Object.fromEntries([...retained].map((key) => [key, keep[key]]));
   }
 
   // 把线程计划态写回 threads 容器（深拷贝当前 plan 字段）。
@@ -888,6 +889,7 @@
       planManualRow: "[data-plan-manual-row]",
       planImportNow: ".g429-plan-import-now",
       planBadge: "[data-plan-badge]",
+      planThread: ".g429-plan-thread",
       planBadge2: "[data-plan-badge2]",
       deliveryStrip: ".g429-delivery-strip",
       deliveryStateText: ".g429-delivery-state-text",
@@ -934,6 +936,7 @@
       traceCount: "[data-trace-count]",
       schat: ".g429-schat",
       schatHead: ".g429-schat-head",
+      schatTitle: ".g429-schat-title",
       schatStatus: ".g429-schat-status",
       schatBody: ".g429-schat-body",
       schatInput: ".g429-schat-input",
@@ -1000,6 +1003,8 @@
     SELECTORS,
     fingerprintThreadId,
     preferredPlanThreadId,
+    normalizeSessionIdentity,
+    buildStewardSessionBootstrap,
     COLLAPSE_DEFAULTS,
     resolveCollapseState,
     toggleCollapse,
@@ -1207,6 +1212,15 @@
     );
   }
 
+  function currentSessionTitle() {
+    const pageTitle = String(document.title || "").replace(/\s+/g, " ").trim();
+    if (pageTitle && !/^(?:codex|chatgpt|codex desktop)$/i.test(pageTitle)) return pageTitle.slice(0, 120);
+    const id = selectedThreadId();
+    const row = id ? document.querySelector(SELECTORS.page.sidebarThreadById(id)) : null;
+    const text = String(row?.innerText || "").split("\n").map((s) => s.trim()).find(Boolean);
+    return (text || "未命名会话").replace(/\s+/g, " ").slice(0, 120);
+  }
+
   // v1.9.1：会话内容指纹兜底——当前 UI 不再给 sidebar 行打 selected/active，
   // 用「首条用户消息前 N 字 + 消息条数」做一个稳定 key，避免所有计划落进 default 桶。
   // v1.9.5：多段信号拼接，降低「同标题/同开头」会话的串号概率
@@ -1238,8 +1252,8 @@
 
   // 计划桶优先跟随稳定的会话内容指纹；显式 sidebar id 仅在已有独立计划桶时使用。
   function preferredPlanThreadId(threadId, sessionKey, planThreads) {
-    const key = String(sessionKey || "");
-    if (key && planThreads && Object.prototype.hasOwnProperty.call(planThreads, key)) return key;
+    void sessionKey;
+    void planThreads;
     return threadId || null;
   }
 
@@ -1259,6 +1273,70 @@
     } catch (_) {
       return null;
     }
+  }
+
+  function normalizeSessionIdentity({ threadId, annotationId, title, fingerprint } = {}) {
+    const candidates = [threadId, annotationId]
+      .map((value) => String(value || "").trim().replace(/^local:/i, ""))
+      .filter(Boolean);
+    const rawId = candidates[0] || "";
+    const sessionId = rawId ? `session:${rawId}` : null;
+    const memoryKey = rawId ? `s_${rawId}` : (String(fingerprint || "").trim() || null);
+    const sessionTitle = String(title || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 120) || "未命名会话";
+    return { sessionId, memoryKey, sessionTitle };
+  }
+
+  function currentSessionIdentity() {
+    return normalizeSessionIdentity({
+      threadId: selectedThreadId(),
+      annotationId: conversationThreadId(),
+      title: currentSessionTitle(),
+      fingerprint: computeSessionKey(),
+    });
+  }
+
+  function currentSessionSnapshot() {
+    const planThreadId = currentThreadId();
+    const identity = currentSessionIdentity();
+    const turn = currentTurn();
+    const signals = currentSignals(planThreadId);
+    return {
+      planThreadId,
+      threadId: planThreadId,
+      sessionId: identity.sessionId,
+      sessionKey: identity.memoryKey,
+      sessionTitle: identity.sessionTitle,
+      turnId: turn.turnId,
+      lastText: String(turn.turnText || ""),
+      hasStop: Boolean(signals.hasStopButton),
+      taskStatus: signals.taskStatus,
+    };
+  }
+
+  function sessionRequestMeta() {
+    const snapshot = currentSessionSnapshot();
+    return {
+      planThreadId: snapshot.planThreadId,
+      sessionId: snapshot.sessionId,
+      sessionKey: snapshot.sessionKey,
+      sessionTitle: snapshot.sessionTitle,
+    };
+  }
+
+  function buildStewardSessionBootstrap({ projectRoot, sessionTitle, sessionId, memoryKey } = {}) {
+    const root = String(projectRoot || "").replace(/\/+$/, "");
+    const key = String(memoryKey || sessionId || "default").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 64);
+    const dir = root ? `${root}/.guardian/sessions/${key}` : `.guardian/sessions/${key}`;
+    return [
+      `【管家】已绑定当前会话「${sessionTitle || "未命名会话"}」（编号 ${key}）。`,
+      `请先建立并只使用这个会话专属记忆目录：${dir}`,
+      `本会话的总结、关键决策、未完成项和下一步只写入该目录；需要管家总结时默认写 ${dir}/SESSION-STATE.md，最新上下文写 ${dir}/LATEST-CONTEXT.md。`,
+      `不得读取或改写其他会话目录；如目录不存在先创建，已存在则复用。`,
+      `验收：目录存在，且 ${dir}/SESSION-STATE.md 包含本会话目标、已完成、未完成、关键决策和下一步。`,
+    ].join("\n");
   }
 
   // ===== 后台（non-foreground）会话探测 =====
@@ -1444,7 +1522,7 @@
 
     // 优先从当前 units 找 assistant 输出；units 为空（虚拟化列表未渲染）时，
     // 回退到 conversation 容器里所有可见的 assistant 节点，避免状态灯永远落不到 completed。
-    // 进一步回退：conversation 容器也查不到时，查 document 全局最近 5 个 assistant 节点。
+    // 不再跨 conversation 做全局回退，避免其他会话残留节点污染当前状态。
     const unitHasAssistant = turn.units.some((unit) =>
       Boolean(
         unit.matches('[data-markdown-text-style="assistant-message"]') ||
@@ -1460,27 +1538,7 @@
           ),
         )
       : false;
-    // global 回退收紧：只看「最近 3 个」assistant 节点里是否有可见的，避免被旧会话的残留污染
-    const globalNodes = [
-      ...document.querySelectorAll(
-        SELECTORS.page.assistantMsg,
-      ),
-    ];
-    const globalHasAssistant = globalNodes
-      .slice(-3)
-      .some((node) => {
-        if (!node.isConnected) return false;
-        const style = window.getComputedStyle(node);
-        const rect = node.getBoundingClientRect();
-        return (
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          rect.width > 0 &&
-          rect.height > 0
-        );
-      });
-    const hasAssistantOutput =
-      unitHasAssistant || conversationHasAssistant || globalHasAssistant;
+    const hasAssistantOutput = unitHasAssistant || conversationHasAssistant;
     return { texts429, unexpectedTexts, hasAssistantOutput };
   }
 
@@ -2207,6 +2265,8 @@
     phase: "idle",
     eventKey: null,
     threadId: null,
+    sessionId: null,
+    sessionTitle: null,
     turnId: null,
     dueAtMs: 0,
     expiresAtMs: 0,
@@ -2268,6 +2328,38 @@
       runtime._planThreadsLoaded = true;
     }
     return planForThread(runtime.planThreads, runtime.planActiveThreadId);
+  }
+
+  function ensureStewardSessionBootstrap() {
+    if (!runtime.settings.steward || !runtime.settings.projectRoot) return null;
+    const identity = currentSessionIdentity();
+    if (!identity.memoryKey) return null;
+    let seen = {};
+    try { seen = JSON.parse(localStorage.getItem(STEWARD_BOOTSTRAP_KEY) || "{}") || {}; } catch (_) { seen = {}; }
+    const marker = `${runtime.settings.projectRoot}::${identity.memoryKey}`;
+    if (seen[marker]) return null;
+    const text = buildStewardSessionBootstrap({
+      projectRoot: runtime.settings.projectRoot,
+      sessionTitle: identity.sessionTitle,
+      sessionId: identity.sessionId,
+      memoryKey: identity.memoryKey,
+    });
+    const tid = currentThreadId() || "default";
+    runtime.planThreads = readPlanThreads();
+    runtime._planThreadsLoaded = true;
+    const plan = planForThread(runtime.planThreads, tid);
+    const next = appendStewardPlan(plan, { fixes: null, nextPlan: text }, "记忆");
+    const firstPending = next.entries.findIndex((entry) => !entry.done && entry.source === "steward");
+    if (firstPending >= 0) next.index = firstPending;
+    runtime.planThreads = upsertThreadPlan(runtime.planThreads, tid, next);
+    writePlanThreads(runtime.planThreads);
+    seen[marker] = { at: Date.now(), sessionId: identity.sessionId, sessionTitle: identity.sessionTitle };
+    try { localStorage.setItem(STEWARD_BOOTSTRAP_KEY, JSON.stringify(seen)); } catch (_) {}
+    if (typeof schatAddMsg === "function") {
+      schatAddMsg("sys", `已为会话「${identity.sessionTitle}」准备专属记忆目录指令：${identity.memoryKey}`);
+    }
+    render();
+    return { tid, memoryKey: identity.memoryKey, text };
   }
 
   installStyles();
@@ -2728,6 +2820,7 @@
   const planEnabledInput = host.querySelector(SELECTORS.ui.planEnabled);
   const planBody = host.querySelector(SELECTORS.ui.planBody);
   const planTextArea = host.querySelector(SELECTORS.ui.planText);
+  const planThreadNode = host.querySelector(SELECTORS.ui.planThread);
   const stewardInput = host.querySelector(SELECTORS.ui.steward);
   const stewardBody = host.querySelector(SELECTORS.ui.stewardBody);
   const stewardModeButtons = [...host.querySelectorAll(SELECTORS.ui.stewardMode)];
@@ -2759,6 +2852,7 @@
   // ===== 侧边管家窗口（自建通道） =====
   const schat = host.querySelector(SELECTORS.ui.schat);
   const schatHead = host.querySelector(SELECTORS.ui.schatHead);
+  const schatTitleNode = host.querySelector(SELECTORS.ui.schatTitle);
   const schatStatus = host.querySelector(SELECTORS.ui.schatStatus);
   const schatBody = host.querySelector(SELECTORS.ui.schatBody);
   const schatInput = host.querySelector(SELECTORS.ui.schatInput);
@@ -2852,6 +2946,14 @@
     schatMsgLog.push({ kind, text });
     while (schatMsgLog.length > 60) schatMsgLog.shift();
   }
+  let lastAnnouncedSessionKey = "";
+  function announceBoundSession() {
+    const identity = currentSessionIdentity();
+    const key = identity.memoryKey || "未编号";
+    if (lastAnnouncedSessionKey === key) return;
+    lastAnnouncedSessionKey = key;
+    schatAddMsg("sys", `已绑定会话「${identity.sessionTitle}」（编号 ${key}）`);
+  }
   function schatSetOpen(open) {
     host.dataset.schatOpen = String(Boolean(open));
     if (schat) {
@@ -2860,6 +2962,7 @@
       schat.style.display = open ? "flex" : "none";
     }
     if (open) schatInput.focus();
+    if (open) announceBoundSession();
   }
   schatLauncher.addEventListener("click", () => schatSetOpen(host.dataset.schatOpen !== "true"));
   schatClose.addEventListener("click", () => schatSetOpen(false));
@@ -2877,9 +2980,9 @@
       // v1.9.27：对话模式——带历史上下文，让管家能理解纠正与追问
       appendChat("user", text);
       const history = readChat().slice(-10);
-      localStorage.setItem(AUDIT_REQUEST_KEY, JSON.stringify({ ts: Date.now(), text, chat: true, history }));
+      localStorage.setItem(AUDIT_REQUEST_KEY, JSON.stringify({ ts: Date.now(), text, chat: true, history, ...sessionRequestMeta() }));
       if (typeof addLog === "function") addLog("info", "对话消息已发送：" + text.slice(0, 60));
-      schatAddMsg("sys", "已发送给管家模型…");
+      schatAddMsg("sys", `已发送给会话「${runtime.sessionTitle || currentSessionTitle()}」的管家模型…`);
       render();
     } catch (err) {
       schatAddMsg("sys", "请求失败：" + String(err).slice(0, 120));
@@ -2894,7 +2997,7 @@
   for (const b of schatActButtons) {
     b.addEventListener("click", () => {
       if (b.dataset.schatAct === "review") {
-        schatAddMsg("sys", "已触发审核（主会话最新成果 → 侧边管家）");
+        schatAddMsg("sys", `已触发审核：会话「${runtime.sessionTitle || currentSessionTitle()}」的最新成果 → 管家窗口`);
         if (typeof triggerStewardReviewManual === "function") void triggerStewardReviewManual();
         else { schatAddMsg("sys", "审核函数未就绪"); }
       } else if (b.dataset.schatAct === "write") {
@@ -3334,7 +3437,7 @@
     }
     runtime.stewardLastTurnId = turnId;
     try {
-      localStorage.setItem(AUDIT_REQUEST_KEY, JSON.stringify({ ts: Date.now() }));
+      localStorage.setItem(AUDIT_REQUEST_KEY, JSON.stringify({ ts: Date.now(), ...sessionRequestMeta() }));
       if (typeof addLog === "function") addLog("info", "自动审核请求已提交（" + mode + "）");
       console.info("[guardian] 已请求守护进程审核", { turnId, mode });
     } catch (_) {}
@@ -3345,9 +3448,9 @@
   // 改为写一个请求标志，由原生守护进程 scripts/steward-daemon.mjs 通过 CDP 读到后执行 LLM 调用。
   async function triggerStewardReviewManual() {
     try {
-      localStorage.setItem(AUDIT_REQUEST_KEY, JSON.stringify({ ts: Date.now() }));
+      localStorage.setItem(AUDIT_REQUEST_KEY, JSON.stringify({ ts: Date.now(), ...sessionRequestMeta() }));
       if (typeof schatAddMsg === "function") {
-        schatAddMsg("sys", "已请求管家审核——由本地守护进程执行（LLM 走原生通道，3 秒内响应）");
+        schatAddMsg("sys", `已请求审核会话「${runtime.sessionTitle || currentSessionTitle()}」——由本地守护进程执行（LLM 走原生通道，3 秒内响应）`);
       }
       render();
     } catch (e) {
@@ -4068,7 +4171,10 @@
     const now = Date.now();
 
     // v1.9.16：每次扫描刷新会话 key（首条消息变化即视为新会话）
-    runtime.sessionKey = computeSessionKey();
+    const sessionIdentity = currentSessionIdentity();
+    runtime.sessionId = sessionIdentity.sessionId;
+    runtime.sessionKey = sessionIdentity.memoryKey;
+    runtime.sessionTitle = sessionIdentity.sessionTitle;
 
     // v1.9.3：外部（另一实例/脚本/守护进程）改过配置或计划板时，重新载入，避免旧内存覆盖
     try {
@@ -4389,6 +4495,9 @@
   stewardInput.addEventListener("change", () => {
     if (stewardInput.checked) runtime.sessionArmed = true;
     setSettings({ ...runtime.settings, steward: stewardInput.checked });
+    if (stewardInput.checked) {
+      ensureStewardSessionBootstrap();
+    }
     if (stewardInput.checked && !runtime.settings.llmModel) {
       toast("管家模式已开，请在面板填 LLM 供应商（API Key + 模型），任务完成时自动审核");
     }
@@ -4396,6 +4505,18 @@
   });
 
   function renderStewardState() {
+    const identity = currentSessionIdentity();
+    const boundTitle = runtime.sessionTitle || identity.sessionTitle;
+    const boundKey = runtime.sessionKey || identity.memoryKey || "未编号";
+    if (planThreadNode) {
+      planThreadNode.textContent = `会话 · ${boundTitle.slice(0, 18)}${boundTitle.length > 18 ? "…" : ""}`;
+      planThreadNode.title = `当前计划绑定会话：${boundTitle}\n编号：${boundKey}`;
+    }
+    if (schatTitleNode) {
+      schatTitleNode.textContent = `管家 · ${boundTitle}`;
+      schatTitleNode.title = `当前绑定会话：${boundTitle}\n会话编号：${boundKey}`;
+    }
+    if (host.dataset.schatOpen === "true") announceBoundSession();
     // 通道状态：LLM 配置是否就绪（v1.8.40 起不再依赖侧边聊天）
     const cfg = runtime.settings;
     if (stewardChannelNode) {
@@ -4551,9 +4672,14 @@
   };
   llmProxyInput.addEventListener("input", saveLlmProxy);
   llmProxyInput.addEventListener("change", saveLlmProxy);
-  const saveProjectRoot = () => setSettings({ ...runtime.settings, projectRoot: projectRootInput.value.trim() });
+  const saveProjectRoot = () => {
+    setSettings({ ...runtime.settings, projectRoot: projectRootInput.value.trim() });
+  };
   projectRootInput.addEventListener("input", saveProjectRoot);
-  projectRootInput.addEventListener("change", saveProjectRoot);
+  projectRootInput.addEventListener("change", () => {
+    saveProjectRoot();
+    if (runtime.settings.steward) ensureStewardSessionBootstrap();
+  });
   deliveryPreviewButton.addEventListener("click", () => {
     localStorage.setItem(DELIVERY_REQUEST_KEY, JSON.stringify(buildDeliveryRequest({ op: "preview" })));
     deliveryPreviewButton.disabled = true;
@@ -4608,6 +4734,7 @@
     },
     getState: () => ({ ...runtime }),
     getSignals: () => currentSignals(),
+    getSessionSnapshot: () => currentSessionSnapshot(),
     // 只读诊断：steward 闭环状态（供 CDP 探针/测试用）
     getStewardState: () => ({
       enabled: runtime.settings.steward,
@@ -4651,10 +4778,13 @@
     // 供原生守护进程调用：由页面自己写计划板（避免 daemon 直写 localStorage 与内存副本冲突），
     // 并立刻排导入倒计时。daemon 只传解析后的文本。
     // v1.9.17：接受 daemon 传来的 threadId（会话指纹），确保写入的是同一个桶，杜绝串台
-    applyStewardPlan: ({ fixes, nextPlan, label, threadId } = {}, delaySeconds) => {
+    applyStewardPlan: ({ fixes, nextPlan, label, threadId, sessionId, sessionKey, sessionTitle, summary } = {}, delaySeconds) => {
       const tid = threadId || runtime.planActiveThreadId || "default";
       // v1.9.17：把活跃线程对齐到本次写入的会话，否则 writePlanThreads 会把这个桶剪掉
       runtime.planActiveThreadId = tid;
+      if (sessionId) runtime.sessionId = sessionId;
+      if (sessionKey) runtime.sessionKey = sessionKey;
+      if (sessionTitle) runtime.sessionTitle = sessionTitle;
       runtime.planThreads = readPlanThreads();
       runtime._planThreadsLoaded = true;
       const plan = planForThread(runtime.planThreads, tid);
@@ -4665,6 +4795,12 @@
       writePlanThreads(runtime.planThreads);
       runtime.planDueAtMs = Date.now() + (Number(delaySeconds) || 10) * 1000;
       runtime.planScheduledForTurnId = tid === "default" ? null : tid;
+      const boundTitle = sessionTitle || runtime.sessionTitle || currentSessionTitle();
+      const boundKey = sessionKey || runtime.sessionKey || "未编号";
+      if (typeof schatAddMsg === "function") {
+        const body = String(summary || nextPlan || "").trim().slice(0, 2000);
+        schatAddMsg("recv", `我已按「${boundTitle}」这个会话核对了最新结果（编号 ${boundKey}）。下一步我建议先这样推进：\n${body || "计划已经写回计划板。"}`);
+      }
       render();
       return { tid, index: runtime.planThreads[tid]?.index, entries: runtime.planThreads[tid]?.entries?.length, dueAtMs: runtime.planDueAtMs };
     },

@@ -33,6 +33,7 @@ const PLAN_QUALITY_RULES = "【计划质量硬约束】下一步必须直接交�
 const MIN_RESULT_CHARS = 40;      // 结果正文至少这么多字
 const SETTLE_MS = 5000;           // 输出至少 5 秒没变化才算收敛
 let lastOutputHash = "";
+let lastMemorySessionKey = "";
 let lastOutputChangedAt = 0;
 
 function textHash(t) {
@@ -462,6 +463,52 @@ function sessionDir(root, sessionKey) {
   return path.join(root, ".guardian", "sessions", key);
 }
 
+function persistSessionMemory({ projectRoot, identity, sourceText, projectCtx, planEntries, summary, now } = {}) {
+  const root = String(projectRoot || "").trim();
+  if (!root) throw new Error("projectRoot is required");
+  const memoryKey = String(identity?.memoryKey || identity?.sessionId || "default");
+  const dir = sessionDir(root, memoryKey);
+  fs.mkdirSync(dir, { recursive: true });
+  const timestamp = new Date(Number(now) || Date.now()).toISOString();
+  const title = String(identity?.sessionTitle || "未命名会话").replace(/\s+/g, " ").trim();
+  const meta = {
+    sessionId: identity?.sessionId || null,
+    memoryKey,
+    sessionTitle: title,
+    projectRoot: root,
+    updatedAt: timestamp,
+  };
+  fs.writeFileSync(path.join(dir, "SESSION.json"), JSON.stringify(meta, null, 2), "utf8");
+  const statePath = path.join(dir, "SESSION-STATE.md");
+  if (!fs.existsSync(statePath)) {
+    fs.writeFileSync(statePath, [
+      "# 会话状态", "", `- 会话名称：${title}`, `- 会话编号：${memoryKey}`, "",
+      "## 本会话目标", "", "待主会话根据当前任务补充。", "",
+      "## 已完成", "", "待补充。", "",
+      "## 未完成/阻塞", "", "待补充。", "",
+      "## 关键决策", "", "待补充。", "",
+      "## 下一步", "", "待管家或主会话补充。", "",
+    ].join("\n"), "utf8");
+  }
+  const docs = (projectCtx?.docs || []).map((doc) => `- ${doc.file}`).join("\n") || "- 无";
+  const plan = (planEntries || []).map((entry) => `- ${entry.done ? "[已完成] " : ""}${entry.text}`).join("\n") || "- 无";
+  const contextMd = [
+    "# 管家最新上下文", "", `- 会话名称：${title}`, `- 会话编号：${memoryKey}`, `- 更新时间：${timestamp}`, "",
+    "## 主会话最新输出", "", String(sourceText || "(无)").slice(0, MAX_MAIN_OUTPUT_CHARS), "",
+    "## 管家本次读取的文档", "", docs, "",
+    "## 当前计划板", "", plan, "",
+  ].join("\n");
+  fs.writeFileSync(path.join(dir, "LATEST-CONTEXT.md"), contextMd, "utf8");
+  if (String(summary || "").trim()) {
+    const summaryMd = [
+      "# 管家总结", "", `- 会话名称：${title}`, `- 会话编号：${memoryKey}`, `- 更新时间：${timestamp}`, "",
+      String(summary).trim(), "",
+    ].join("\n");
+    fs.writeFileSync(path.join(dir, "STEWARD-SUMMARY.md"), summaryMd, "utf8");
+  }
+  return { dir, meta };
+}
+
 function collectTree(root) {
   const out = [];
   function walk(dir, depth, prefix) {
@@ -498,6 +545,13 @@ function collectProjectDocs(root, sessionKey) {
   const sdir = sessionDir(root, sessionKey);
   try {
     const items = fs.readdirSync(sdir).filter((n) => /\.md$/i.test(n)).sort().reverse();
+    const priority = ["SESSION-STATE.md", "PROJECT-STATE.md", "REA-EVIDENCE.md", "LATEST-CONTEXT.md", "STEWARD-SUMMARY.md"];
+    items.sort((a, b) => {
+      const ai = priority.indexOf(a);
+      const bi = priority.indexOf(b);
+      if (ai >= 0 || bi >= 0) return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+      return b.localeCompare(a);
+    });
     for (const n of items) {
       if (docs.length >= 2) break;
       const txt = safeRead(path.join(sdir, n), MAX_SESSION_DOC_CHARS);
@@ -776,22 +830,34 @@ async function tick(cdp) {
     try { plan = planRaw ? JSON.parse(planRaw) : {}; } catch(_) {}
     const g = window.__CODEX_429_GUARDIAN__;
     const rt = g?.getState ? g.getState() : null;
+    const snap = g?.getSessionSnapshot ? g.getSessionSnapshot() : null;
     // 主任务输出：按可靠性多级回退（当前 UI 版本 content-search-unit 可能为 0 宽）
     function grabText() {
+      const visible = (el) => {
+        if (!el || !el.isConnected) return false;
+        const r = el.getBoundingClientRect();
+        const st = getComputedStyle(el);
+        return r.width > 0 && r.height > 0 && st.display !== "none" && st.visibility !== "hidden";
+      };
+      const conv = [...document.querySelectorAll('[data-response-annotation-conversation]')].filter(visible).at(-1)?.getAttribute('data-response-annotation-conversation') || null;
+      const inScope = (el) => {
+        const owner = el.closest('[data-response-annotation-conversation]')?.getAttribute('data-response-annotation-conversation') || null;
+        return !conv || !owner || owner === conv;
+      };
       // ① 助手 markdown 块（最可靠）
-      const md = Array.from(document.querySelectorAll('[data-markdown-text-style]'));
+      const md = Array.from(document.querySelectorAll('[data-markdown-text-style]')).filter((el) => visible(el) && inScope(el));
       if (md.length) {
         const tail = md.slice(-4).map(function(el){ return (el.innerText||'').trim(); }).filter(Boolean);
         if (tail.length) return tail.join(' || ').slice(-4000);
       }
       // ② annotation target
-      const ann = Array.from(document.querySelectorAll('[data-response-annotation-target]'));
+      const ann = Array.from(document.querySelectorAll('[data-response-annotation-target]')).filter((el) => visible(el) && inScope(el));
       if (ann.length) {
         const t = ann.slice(-3).map(function(el){ return (el.innerText||'').trim(); }).filter(Boolean);
         if (t.length) return t.join(' || ').slice(-4000);
       }
       // ③ content-search-unit（不过滤宽度）
-      const un = Array.from(document.querySelectorAll('[data-content-search-unit-key]'));
+      const un = Array.from(document.querySelectorAll('[data-content-search-unit-key]')).filter(inScope);
       if (un.length) {
         const t = un.slice(-2).map(function(el){ return (el.innerText||'').trim(); }).filter(Boolean);
         if (t.length) return t.join(' || ').slice(-4000);
@@ -800,18 +866,20 @@ async function tick(cdp) {
       const main = document.querySelector('main');
       return main ? (main.innerText||'').slice(-3000) : '';
     }
-    const lastText = grabText();
+    const lastText = String(snap?.lastText || grabText()).trim();
     const stop = [...document.querySelectorAll('button[aria-label]')].some(b => /^(停止|stop)$/i.test(b.getAttribute('aria-label')||'') && b.getBoundingClientRect().width>0);
     return {
       settings: s,
       plan,
-      taskStatus: rt?.taskStatus || null,
-      threadId: rt?.threadId || null,
-      turnId: rt?.turnId || null,
+      taskStatus: snap?.taskStatus || rt?.taskStatus || null,
+      threadId: snap?.threadId || rt?.threadId || null,
+      turnId: snap?.turnId || rt?.turnId || null,
       lastText,
       hasStop: stop,
-      activeThread: rt?.planActiveThreadId || rt?.threadId || null,
-      sessionKey: rt?.sessionKey || null,
+      activeThread: snap?.planThreadId || rt?.planActiveThreadId || rt?.threadId || null,
+      sessionKey: snap?.sessionKey || rt?.sessionKey || null,
+      sessionId: snap?.sessionId || rt?.sessionId || null,
+      sessionTitle: snap?.sessionTitle || rt?.sessionTitle || null,
       auditRequest: localStorage.getItem("codex429Guardian.auditRequest.v1"),
       credentialRequest: localStorage.getItem("codex429Guardian.credentialRequest.v1"),
       deliveryRequest: localStorage.getItem("codex429Guardian.deliveryRequest.v1"),
@@ -836,15 +904,30 @@ async function tick(cdp) {
     await appendLog(cdp, "err", "旧 API Key 迁移 Keychain 失败：" + String(error.message || error).slice(0, 100), { tag: "credential", mode: "credential" });
   }
   await handleCredentialRequest(cdp, state.credentialRequest);
-  const tid = state.sessionKey || state.activeThread || state.threadId || "default";
-  const plan = state.plan?.[tid] || state.plan?.default || { entries: [], index: 0, delaySeconds: 10 };
+  const planTid = state.activeThread || state.threadId || "default";
+  const memoryKey = state.sessionKey || state.sessionId || planTid;
+  const sessionIdentity = {
+    sessionId: state.sessionId || `session:${String(memoryKey).replace(/^s_/, "")}`,
+    memoryKey,
+    sessionTitle: state.sessionTitle || "未命名会话",
+  };
+  const plan = state.plan?.[planTid] || { entries: [], index: 0, delaySeconds: 30 };
   const projectRoot = String(s.projectRoot || "").trim();
   const reviewSourceText = reqText || state.lastText || "";
+
+  if (projectRoot && (s.steward || s.stewardAuto) && memoryKey !== lastMemorySessionKey) {
+    try {
+      persistSessionMemory({ projectRoot, identity: sessionIdentity, sourceText: reviewSourceText, projectCtx: { docs: [] }, planEntries: plan.entries || [] });
+      lastMemorySessionKey = memoryKey;
+    } catch (error) {
+      log("会话记忆目录初始化失败", error.message);
+    }
+  }
 
   const deliveryContext = {
     settings: s,
     projectRoot,
-    tid,
+    tid: memoryKey,
     sourceText: reviewSourceText,
     planEntries: (plan.entries || []).slice(0, 20),
   };
@@ -890,8 +973,9 @@ async function tick(cdp) {
     const history = reqChat.history.slice(-10).map((m) => (m.role === "user" ? "用户：" : "管家：") + String(m.text || "")).join("\n");
     // v1.9.29：对话也要带真实项目上下文（目录树 + 文档摘要），否则无法解释代码细节
     const chatRoot = String(s.projectRoot || "").trim();
-    const chatTid = state.sessionKey || state.activeThread || state.threadId || "default";
+    const chatTid = memoryKey;
     const chatCtx = buildProjectContextCached(chatRoot, reqChat.text, chatTid);
+    if (chatRoot) persistSessionMemory({ projectRoot: chatRoot, identity: sessionIdentity, sourceText: reqChat.text, projectCtx: chatCtx, planEntries: plan.entries || [] });
     let ctxPart = "项目目录：" + (chatRoot || "(未配置)");
     if (chatCtx.ok) {
       ctxPart += "\n\n【目录结构】\n" + String(chatCtx.tree || "").slice(0, 3000);
@@ -906,6 +990,7 @@ async function tick(cdp) {
     if (state.lastText) ctxPart += "\n\n【最近主任务输出】\n" + String(state.lastText).slice(0, 6000);
 
     const chatPrompt = [
+      `当前绑定会话：${sessionIdentity.sessionTitle}（${memoryKey}）`,
       "你是 Codex Guardian 的审核管家。用户在与你对话，可以纠正你的判断、补充信息、追问理由。",
       "回答要求：简洁、直接、中文；涉及项目事实时优先引用下面材料中出现的内容；材料里确实没有就明确说没有，不要编。",
       "",
@@ -923,6 +1008,7 @@ async function tick(cdp) {
     try {
       const reply = await callLlm(s, chatPrompt);
       await cdp.eval(`window.__codex429ChatReply && window.__codex429ChatReply(${JSON.stringify(reply.slice(0, 2000))})`).catch(() => {});
+      if (chatRoot) persistSessionMemory({ projectRoot: chatRoot, identity: sessionIdentity, sourceText: reqChat.text, projectCtx: chatCtx, planEntries: plan.entries || [], summary: reply });
       await trace(cdp, "对话·已回复", reply.slice(0, 60).replace(/\n/g, " "), "ok");
       await appendLog(cdp, "info", "对话回复：" + reply.slice(0, 80).replace(/\n/g, " "), { mode: "chat" });
     } catch (e) {
@@ -948,15 +1034,16 @@ async function tick(cdp) {
   }
 
   const planEntries = (plan.entries || []).slice(0, 20);
-  const projectStatus = `任务状态 ${state.taskStatus}；计划板 ${planEntries.filter(e => e.done).length}/${planEntries.length} 段已完成；会话 ${tid}。`;
+  const projectStatus = `任务状态 ${state.taskStatus}；计划板 ${planEntries.filter(e => e.done).length}/${planEntries.length} 段已完成；当前会话「${sessionIdentity.sessionTitle}」，会话编号 ${memoryKey}，计划绑定 ${planTid}。`;
 
   const mode = s.stewardMode || "review";
 
   // 项目上下文：读目录结构 + README/HANDOFF 等文档 + 会话里提到的 md
-  const projectCtx = buildProjectContextCached(projectRoot, reviewSourceText, tid);
+  const projectCtx = buildProjectContextCached(projectRoot, reviewSourceText, memoryKey);
   const qualitySupportText = projectCtx.ok
     ? [String(projectCtx.tree || "")].concat((projectCtx.docs || []).map((doc) => doc.file + "\n" + String(doc.text || ""))).join("\n").slice(0, 12000)
     : "";
+  if (projectRoot) persistSessionMemory({ projectRoot, identity: sessionIdentity, sourceText: reviewSourceText, projectCtx, planEntries });
   if (projectCtx.ok) {
     await trace(cdp, projectCtx.cacheHit ? "上下文缓存命中" : "上下文缓存重建",
       "tree " + String(projectCtx.tree || "").split("\n").filter(Boolean).length + " 项 / docs " + projectCtx.docs.length + " 个",
@@ -1004,7 +1091,7 @@ async function tick(cdp) {
     return;
   }
 
-  log("触发审核", { turnId, mode, tid, promptHash });
+  log("触发审核", { turnId, mode, session: memoryKey, sessionTitle: sessionIdentity.sessionTitle, planTid, promptHash });
   await trace(cdp, "读取主任务输出", String(reviewSourceText || "").length + " 字", "read");
   await trace(cdp, "读取项目上下文", projectRoot || "(未配置项目目录)", "read");
   let reply;
@@ -1030,12 +1117,12 @@ async function tick(cdp) {
     let guide = "";
     let label = "会话总结";
     if (control.kind === "summary") {
-      const mdPath = projectRoot ? path.join(sessionDir(projectRoot, tid), "SESSION-STATE.md") : "SESSION-STATE.md";
+      const mdPath = projectRoot ? path.join(sessionDir(projectRoot, memoryKey), "SESSION-STATE.md") : "SESSION-STATE.md";
       guide = "【管家】当前材料不足以判断下一步。请先把本次会话状态写成 " + mdPath +
         "，必须包含：1) 本会话目标 2) 已完成内容（含文件） 3) 未完成/阻塞 4) 关键决策 5) 建议下一步。" +
         (control.text ? " 额外要求：" + control.text : "");
     } else {
-      const mdPath = projectRoot ? path.join(sessionDir(projectRoot, tid), "REA-EVIDENCE.md") : "REA-EVIDENCE.md";
+      const mdPath = projectRoot ? path.join(sessionDir(projectRoot, memoryKey), "REA-EVIDENCE.md") : "REA-EVIDENCE.md";
       label = "探测";
       guide = "【管家·探测】现有材料不足以完整落地，请先用 rea 探测：" + control.text.replace(/\s+/g, " ") +
         " 然后把探测到的实现依据写入 " + mdPath +
@@ -1045,7 +1132,7 @@ async function tick(cdp) {
     const appliedControl = await cdp.eval(`(function(){
       const g = window.__CODEX_429_GUARDIAN__;
       if (g && typeof g.applyStewardPlan === "function") {
-        return JSON.stringify(g.applyStewardPlan({ fixes: null, nextPlan: ${JSON.stringify(guide)}, label: ${JSON.stringify(label)}, threadId: ${JSON.stringify(tid)} }, ${plan.delaySeconds || 30}));
+        return JSON.stringify(g.applyStewardPlan({ fixes: null, nextPlan: ${JSON.stringify(guide)}, label: ${JSON.stringify(label)}, threadId: ${JSON.stringify(planTid)}, sessionId: ${JSON.stringify(sessionIdentity.sessionId)}, sessionKey: ${JSON.stringify(memoryKey)}, sessionTitle: ${JSON.stringify(sessionIdentity.sessionTitle)}, summary: ${JSON.stringify(guide)} }, ${plan.delaySeconds || 30}));
       }
       return "NO_API";
     })()`).catch(() => "ERR");
@@ -1195,7 +1282,7 @@ async function tick(cdp) {
   if (!nextPlanText) nextPlanText = null;
   if (!projectCtx.ok) {
     const mdName = "PROJECT-STATE.md";
-    const where = projectRoot ? path.join(sessionDir(projectRoot, tid), mdName) : mdName;
+    const where = projectRoot ? path.join(sessionDir(projectRoot, memoryKey), mdName) : mdName;
     const guide =
       `【管家】项目理解不足（${projectCtx.reason}）。` +
       `请先输出项目状态总结到 ${where}，必须包含五节：` +
@@ -1210,7 +1297,7 @@ async function tick(cdp) {
     const g = window.__CODEX_429_GUARDIAN__;
     if (g && typeof g.applyStewardPlan === "function") {
       return JSON.stringify(g.applyStewardPlan(
-        { fixes: ${JSON.stringify(parsed.fixes || null)}, nextPlan: ${JSON.stringify(nextPlanText)}, label: ${JSON.stringify(type.planLabel || "下一步")}, threadId: ${JSON.stringify(tid)} },
+        { fixes: ${JSON.stringify(parsed.fixes || null)}, nextPlan: ${JSON.stringify(nextPlanText)}, label: ${JSON.stringify(type.planLabel || "下一步")}, threadId: ${JSON.stringify(planTid)}, sessionId: ${JSON.stringify(sessionIdentity.sessionId)}, sessionKey: ${JSON.stringify(memoryKey)}, sessionTitle: ${JSON.stringify(sessionIdentity.sessionTitle)}, summary: ${JSON.stringify(reply)} },
         ${plan.delaySeconds || 10}
       ));
     }
@@ -1218,6 +1305,13 @@ async function tick(cdp) {
   })()`);
   await cdp.eval(`localStorage.setItem(${JSON.stringify(AUDIT_KEY)}, ${JSON.stringify(turnId)})`).catch(() => {});
   log("页面写回结果", applied);
+  if (projectRoot) {
+    try {
+      persistSessionMemory({ projectRoot, identity: sessionIdentity, sourceText: reviewSourceText, projectCtx, planEntries: next.entries || [], summary: reply });
+    } catch (error) {
+      log("管家总结落盘失败", error.message);
+    }
+  }
   await trace(cdp, "写入计划板", String(applied).slice(0, 120), "write");
   // 日志里显式记录「依据 → 指令」，可回溯
   const evidenceSrc = parsed.risks || (String(reply).match(/##\s*关键短板\s*\n([\s\S]*?)(?=\n##\s|$)/) || [])[1] || "";
@@ -1229,11 +1323,11 @@ async function tick(cdp) {
   const planOneLine = String(parsed.nextPlan || "").replace(/\s+/g, " ").trim().slice(0, 180);
   await appendLog(cdp, "ok", "依据：" + (evidenceOneLine || "(见回复)") + " ｜ 指令：" + (planOneLine || "(无)"), { hash: promptHash, mode });
 
-  log("已写回计划板", { tid, index: next.index, entries: next.entries.length });
+  log("已写回计划板", { session: memoryKey, sessionTitle: sessionIdentity.sessionTitle, planTid, index: next.index, entries: next.entries.length });
   await refreshDeliveryState(cdp, {
     settings: s,
     projectRoot,
-    tid,
+    tid: memoryKey,
     sourceText: reviewSourceText,
     planEntries: (next.entries || []).slice(0, 20),
   }).catch((error) => log("交付状态刷新失败", error.message));
@@ -1281,7 +1375,7 @@ async function main() {
   }
 }
 
-export { buildProjectContext, collectProjectDocs, collectReferencedMds, sessionDir, buildPrompt, extractProjectGoal, textHash, errorTag };
+export { buildProjectContext, collectProjectDocs, collectReferencedMds, sessionDir, persistSessionMemory, buildPrompt, extractProjectGoal, textHash, errorTag };
 
 if (process.argv.includes("--once")) {
   (async () => {

@@ -78,7 +78,7 @@ test("control directives are parsed before ordinary plan formatting", () => {
 });
 
 test("plan scheduling prefers a matching session fingerprint over the transient sidebar id", () => {
-  assert.equal(core.preferredPlanThreadId("local:abc", "fp:stable", { "fp:stable": { entries: [] } }), "fp:stable");
+  assert.equal(core.preferredPlanThreadId("local:abc", "fp:stable", { "fp:stable": { entries: [] } }), "local:abc");
   assert.equal(core.preferredPlanThreadId("local:abc", "fp:missing", { "local:abc": { entries: [] } }), "local:abc");
   assert.equal(core.preferredPlanThreadId(null, null, {}), null);
 });

@@ -185,7 +185,7 @@ def make_vertical():
     draw = ImageDraw.Draw(image, "RGBA")
 
     rounded(draw, (48, 48, 1032, 1392), 28, fill=None, outline="#21445c", width=1)
-    text(draw, (82, 82), "FULL STEWARD / V2.0.2", 15, "demi", COLORS["cyan"])
+    text(draw, (82, 82), "FULL STEWARD / V2.1.0", 15, "demi", COLORS["cyan"])
     text(draw, (82, 130), "Codex Full", 84, "bold")
     text(draw, (82, 222), "Steward", 84, "bold")
     text(draw, (82, 314), "Plugin", 84, "bold")

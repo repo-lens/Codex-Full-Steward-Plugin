@@ -4,9 +4,9 @@
 >
 > A local-first AI task steward for Codex desktop: quality gates, model fallback, plan execution, verified delivery, conservative cleanup, and unattended review.
 
-[![Version](https://img.shields.io/badge/version-2.0.2-58c4dd)](#)
+[![Version](https://img.shields.io/badge/version-2.1.0-58c4dd)](#)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%2B%20Codex-7bd88f)](#)
-[![Tests](https://img.shields.io/badge/tests-140%20passing-7bd88f)](#verification)
+[![Tests](https://img.shields.io/badge/tests-145%20passing-7bd88f)](#verification)
 [![License](https://img.shields.io/badge/license-MIT-f2c94c)](LICENSE)
 
 ![Codex Full Steward Plugin](assets/poster-horizontal.png)
@@ -45,6 +45,23 @@ Task completes
 3. **429 recovery is an optional resilience layer.** It sits folded at the bottom and never defines the product.
 
 ![Steward panel](assets/guardian-ui.png)
+
+## Session Binding and Memory
+
+Every plan and steward review is bound to the currently open Codex session, using its sidebar UUID and visible session title. Plan boards no longer fall back to a shared `default` bucket.
+
+When steward mode is enabled, the plugin queues a one-time memory-folder instruction for that session. The native daemon also provisions:
+
+```text
+.guardian/sessions/s_<session-uuid>/
+├── SESSION.json
+├── SESSION-STATE.md
+├── LATEST-CONTEXT.md
+├── STEWARD-SUMMARY.md
+└── context-cache.json
+```
+
+The daemon reads only the current session's private directory plus project-level documents. Session-specific Markdown from another UUID is rejected.
 
 ## Core Capabilities
 
@@ -200,7 +217,7 @@ Read the source-backed comparison: [COMPETITIVE-ANALYSIS.md](COMPETITIVE-ANALYSI
 
 ## Verification
 
-- Unit tests: **140/140**
+- Unit tests: **145/145**
 - Real CDP E2E: **10/10**
 - Functional and strategy round: **10/10**
 - Safety and delivery round: **10/10**

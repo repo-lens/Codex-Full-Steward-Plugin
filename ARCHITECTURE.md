@@ -101,13 +101,13 @@ completed stable task
 
 ## Session Isolation
 
-Plans are keyed by a content fingerprint derived from the first message of the Codex session. Session-specific docs live under:
+Plans are keyed by the active Codex session UUID. The visible title and UUID are read together from the selected sidebar row and conversation annotation; the title is informational, while the UUID is the isolation key. Session-specific docs live under:
 
 ```text
-.guardian/sessions/<session-key>/
+.guardian/sessions/s_<session-uuid>/
 ```
 
-The daemon refuses to read another session's private directory.
+The daemon refuses to read another session's private directory. It records `SESSION.json`, `SESSION-STATE.md`, `LATEST-CONTEXT.md`, `STEWARD-SUMMARY.md`, and `context-cache.json` inside the bound session folder. There is no fallback from a named session plan to another session or to the shared `default` bucket.
 
 ## Security Boundaries
 

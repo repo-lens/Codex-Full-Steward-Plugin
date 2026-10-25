@@ -993,14 +993,14 @@ test("prunePlanThreads: 数字键（数组被 spread 的产物）被丢弃，合
   assert.equal(out.default.delaySeconds, 30);
 });
 
-test("prunePlanThreads: 只保留 default + 当前活跃线程", () => {
+test("prunePlanThreads: 保留多个会话的独立计划桶，避免切会话后计划丢失", () => {
   const threads = {
     default: { enabled: true, entries: [], index: 0, delaySeconds: 30 },
     "local:aaa": { enabled: true, entries: [], index: 0, delaySeconds: 30 },
     "local:bbb": { enabled: true, entries: [], index: 0, delaySeconds: 30 },
   };
   const out = core.prunePlanThreads(threads, "local:aaa");
-  assert.deepEqual(Object.keys(out).sort(), ["default", "local:aaa"]);
+  assert.deepEqual(Object.keys(out).sort(), ["default", "local:aaa", "local:bbb"]);
 });
 
 test("prunePlanThreads: 非计划对象（缺 entries / entries 非数组）被丢弃", () => {
@@ -1144,4 +1144,38 @@ test("shouldImportPlan: 导入冷却窗口内不会重复操作输入框", () =>
   assert.equal(core.shouldImportPlan({ ...base, nowMs: 1000, lastImportAtMs: 0 }), false);
   // 超过冷却后可再次导入
   assert.equal(core.shouldImportPlan({ ...base, nowMs: 5000, lastImportAtMs: 0 }), true);
+});
+
+// ===== Session-bound steward memory (v2.1.0) =====
+test("session identity normalizes sidebar and annotation ids to one memory key", () => {
+  const identity = core.normalizeSessionIdentity({
+    threadId: "local:01a1587f-e981-7011-9142-fde7981f7aa2",
+    annotationId: "01a1587f-e981-7011-9142-fde7981f7aa2",
+    title: "  总结项目状态，清理旧冗余对话  ",
+  });
+  assert.equal(identity.sessionId, "session:01a1587f-e981-7011-9142-fde7981f7aa2");
+  assert.equal(identity.memoryKey, "s_01a1587f-e981-7011-9142-fde7981f7aa2");
+  assert.equal(identity.sessionTitle, "总结项目状态，清理旧冗余对话");
+});
+
+test("plan board never falls back to another session default bucket", () => {
+  const threads = {
+    default: { enabled: true, entries: [{ text: "other session plan" }], index: 0, delaySeconds: 30 },
+  };
+  const current = core.planForThread(threads, "local:current");
+  assert.equal(current.enabled, false);
+  assert.deepEqual(current.entries, []);
+});
+
+test("steward bootstrap instruction binds summary files to the current session folder", () => {
+  const guide = core.buildStewardSessionBootstrap({
+    projectRoot: "/tmp/project",
+    sessionTitle: "总结项目状态",
+    sessionId: "session:abc",
+    memoryKey: "s_abc",
+  });
+  assert.match(guide, /总结项目状态/);
+  assert.match(guide, /\.guardian\/sessions\/s_abc/);
+  assert.match(guide, /SESSION-STATE\.md/);
+  assert.match(guide, /不得读取或改写其他会话目录/);
 });

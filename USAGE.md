@@ -10,6 +10,18 @@
 
 Product order: steward review first, plan-board execution second, optional 429 recovery last.
 
+## Session Binding
+
+The steward window shows the exact session title it is bound to. Switching Codex sessions updates the title, session UUID, plan bucket, and memory directory together.
+
+Session memory is stored at:
+
+```text
+<project>/.guardian/sessions/s_<session-uuid>/
+```
+
+Enabling steward mode queues a one-time instruction to initialize `SESSION-STATE.md`. `LATEST-CONTEXT.md` and `STEWARD-SUMMARY.md` are refreshed by the daemon after each review. Other session directories are never read.
+
 ## Movable Panel
 
 Drag from any non-interactive blank area of the panel.

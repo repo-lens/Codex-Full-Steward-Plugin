@@ -1,12 +1,12 @@
 # Verification and Scorecard
 
-Research and test date: 2026-10-23
+Research and test date: 2026-10-25
 
 ## Automated Tests
 
 | Area | Result |
 |---|---:|
-| Unit and integration tests | 140/140 |
+| Unit and integration tests | 145/145 |
 | Real CDP E2E | 10/10 |
 | Functional and strategy round | 10/10 |
 | Safety and delivery round | 10/10 |
