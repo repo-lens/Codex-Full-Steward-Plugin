@@ -9,7 +9,32 @@ import {
   summarizeProviderFailure,
   persistSessionMemory,
   collectReferencedMds,
+  buildPrompt,
 } from "../scripts/steward-daemon.mjs";
+
+// v2.1.1：会话绑定声明——每个 prompt 显式携带会话名+编号，且禁止跨会话/跨项目引用
+test("buildPrompt declares the bound session and forbids cross-session md references", () => {
+  const prompt = buildPrompt({
+    mainOutput: "测试输出".repeat(50),
+    projectStatus: "任务 completed；计划板 0/1 段已完成；当前会话「onfuzz vs Infuse 对比」，会话编号 s_aaaa，计划绑定 s_aaaa。".slice(0, 2000),
+    planEntries: [],
+    mode: "review",
+    projectCtx: { ok: true, tree: "onfuzz/", docs: [] },
+    projectGoal: "对比 onfuzz 与 Infuse".slice(0, 300),
+    sessionIdentity: { sessionTitle: "onfuzz vs Infuse 对比", memoryKey: "s_aaaa", sessionId: "session:aaaa" },
+    memoryKey: "s_aaaa",
+  });
+  assert.ok(prompt.includes("【当前绑定会话】onfuzz vs Infuse 对比（编号 s_aaaa）"), "missing session binding line");
+  assert.ok(prompt.includes(".guardian/sessions/s_aaaa/"), "binding must name the session's own memory dir");
+  assert.ok(/禁止引用其他会话目录/.test(prompt), "missing cross-session ban");
+  assert.ok(prompt.indexOf("【当前绑定会话】") < prompt.indexOf("【主任务本轮输出】"), "binding must appear before the materials");
+});
+
+test("buildPrompt without sessionIdentity still degrades gracefully", () => {
+  const prompt = buildPrompt({ mainOutput: "输出", projectStatus: "s", planEntries: [], mode: "review", projectCtx: { ok: true, tree: "t", docs: [] }, projectGoal: "" });
+  assert.ok(prompt.includes("【当前绑定会话】"));
+  assert.ok(prompt.includes("未命名会话"));
+});
 
 test("derivePolicyChecks passes verification only when observable verification exists", () => {
   const missing = derivePolicyChecks({

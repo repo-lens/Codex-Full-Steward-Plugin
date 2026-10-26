@@ -9,7 +9,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "2.1.0";
+  const VERSION = "2.1.1";
   const PRODUCT_NAME = "Codex Full Steward Plugin";
   const PRODUCT_TITLE = "Codex Full Steward";
   const PANEL_SECTION_ORDER = Object.freeze(["steward", "plan", "r429"]);
@@ -1240,7 +1240,14 @@
   }
 
   // v1.9.16：会话隔离 key——用「首条消息」指纹，保证同一项目下不同对话互不串台。
-  function computeSessionKey() {
+  function computeSessionKey(opts = {}) {
+    // v2.1.1：优先复用 currentThreadId() 的完整结果（显式 id / annotation / 内容指纹），
+    // 保证「计划桶 key」与「会话记忆目录 key」同源，不再分叉；
+    // opts.sharedThreadId 供纯函数单测注入（DOM 不存在时也能验证同源逻辑）。
+    const shared = (typeof opts.sharedThreadId === "string" && opts.sharedThreadId)
+      ? opts.sharedThreadId
+      : (typeof document === "undefined" ? null : currentThreadId());
+    if (shared && String(shared).startsWith("fp:")) return shared;
     try {
       const main = document.querySelector(SELECTORS.page.main);
       if (!main) return null;

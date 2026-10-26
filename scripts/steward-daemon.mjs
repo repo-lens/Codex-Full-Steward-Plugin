@@ -721,7 +721,18 @@ function extractProjectGoal(projectCtx) {
   return para.join(" ").slice(0, 300);
 }
 
-function buildPrompt({ mainOutput, projectStatus, planEntries, mode, projectCtx, projectGoal }) {
+// v2.1.1：会话绑定声明——每个 prompt 开头显式写明「当前会话 + 编号」，并禁止跨会话读取。
+function sessionPromptBinding(identity, memoryKey) {
+  const title = String(identity?.sessionTitle || "未命名会话");
+  const key = String(memoryKey || "default");
+  return [
+    "【当前绑定会话】" + title + "（编号 " + key + "）。你所有结论、引用与下一步计划都只针对这个会话与它的 .guardian/sessions/" + key + "/ 目录。",
+    "禁止引用其他会话目录（.guardian/sessions/ 下其他编号）里的 md 内容；若材料里出现别的项目/别会话的路径（如 codex-429-guardian 源码、别的 HANDOFF），直接忽略，不得据此改计划。",
+    "若你的会话记忆目录（.guardian/sessions/ 下你的编号目录）里还没有本会话的状态文件（SESSION-STATE.md / LATEST-CONTEXT.md），优先要求主会话按五节写出 SESSION-STATE.md（输出「## 需要会话总结」），不得拿别项目的文档充当本会话依据。",
+  ].join("\n");
+}
+
+function buildPrompt({ mainOutput, projectStatus, planEntries, mode, projectCtx, projectGoal, sessionIdentity, memoryKey }) {
   const type = core.stewardReviewTypeById ? core.stewardReviewTypeById(mode) : { label: "审核", planLabel: "下一步", focus: "" };
   const kindHint = {
     review: "全面审核：既要判断本轮产出是否达标，也要从项目整体框架判断推进方向是否正确。",
@@ -754,6 +765,7 @@ function buildPrompt({ mainOutput, projectStatus, planEntries, mode, projectCtx,
 
   const head = [PLAN_QUALITY_RULES,
     "你是本项目的技术审核管家。你拿到了项目的目录结构、关键文档、本轮主任务输出和计划板现状。",
+    sessionPromptBinding(sessionIdentity, memoryKey),
     "请基于项目整体框架判断本轮产出，而不是只看本轮文字。",
     "",
     "【必须按以下顺序处理，不要跳步】",
@@ -990,6 +1002,7 @@ async function tick(cdp) {
     if (state.lastText) ctxPart += "\n\n【最近主任务输出】\n" + String(state.lastText).slice(0, 6000);
 
     const chatPrompt = [
+      sessionPromptBinding(sessionIdentity, memoryKey),
       `当前绑定会话：${sessionIdentity.sessionTitle}（${memoryKey}）`,
       "你是 Codex Guardian 的审核管家。用户在与你对话，可以纠正你的判断、补充信息、追问理由。",
       "回答要求：简洁、直接、中文；涉及项目事实时优先引用下面材料中出现的内容；材料里确实没有就明确说没有，不要编。",
@@ -1071,8 +1084,10 @@ async function tick(cdp) {
         mode,
         projectCtx,
         projectGoal: extractProjectGoal(projectCtx),
+        sessionIdentity,
+        memoryKey,
       }) + "\n\n【本次为自定义指令，请围绕上面的指令作答，但所有结论必须能在上面的项目材料中找到依据】"
-    : buildPrompt({ mainOutput: state.lastText, projectStatus, planEntries, mode, projectCtx, projectGoal: extractProjectGoal(projectCtx) });
+    : buildPrompt({ mainOutput: state.lastText, projectStatus, planEntries, mode, projectCtx, projectGoal: extractProjectGoal(projectCtx), sessionIdentity, memoryKey });
 
   // 去重：同 prompt 10 分钟内不重复调用（防止同因反复触发）
   const promptHash = shortHash(prompt);

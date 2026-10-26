@@ -1130,6 +1130,14 @@ test("computeSessionKey 语义: 同项目不同对话首条消息不同 -> key �
   assert.notEqual(a, b);
 });
 
+// ===== v2.1.1：computeSessionKey 与 currentThreadId 对齐（防止计划桶/记忆目录分叉）=====
+test("computeSessionKey: 当 currentThreadId 命中会话指纹时二者返回同一个 key", () => {
+  const fp = core.fingerprintThreadId("同一对话的首条消息内容");
+  assert.equal(core.computeSessionKey({ sharedThreadId: fp }), fp);
+  assert.equal(core.computeSessionKey({ sharedThreadId: "local:abc" }), null);
+  assert.equal(core.computeSessionKey({ sharedThreadId: null }), null);
+});
+
 // ===== 计划板倒计时完成后不频繁操作输入框（v1.9.16）=====
 test("canAutoImport: 关闭倒计时时不导入，开启才允许（倒计时读完不会连着再发）", () => {
   const plan = { enabled: true, entries: [{ text: "a", done: false }], index: 0, delaySeconds: 30 };

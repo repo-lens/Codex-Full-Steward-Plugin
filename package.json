@@ -1,6 +1,6 @@
 {
   "name": "codex-full-steward-plugin",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Local-first AI task steward for Codex desktop: quality gates, model fallback, plan execution, verified delivery, conservative cleanup, and unattended review.",
   "author": "Yang Yizhu",
   "private": true,
