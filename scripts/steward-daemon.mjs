@@ -726,10 +726,42 @@ function sessionPromptBinding(identity, memoryKey) {
   const title = String(identity?.sessionTitle || "未命名会话");
   const key = String(memoryKey || "default");
   return [
-    "【当前绑定会话】" + title + "（编号 " + key + "）。你所有结论、引用与下一步计划都只针对这个会话与它的 .guardian/sessions/" + key + "/ 目录。",
-    "禁止引用其他会话目录（.guardian/sessions/ 下其他编号）里的 md 内容；若材料里出现别的项目/别会话的路径（如 codex-429-guardian 源码、别的 HANDOFF），直接忽略，不得据此改计划。",
-    "若你的会话记忆目录（.guardian/sessions/ 下你的编号目录）里还没有本会话的状态文件（SESSION-STATE.md / LATEST-CONTEXT.md），优先要求主会话按五节写出 SESSION-STATE.md（输出「## 需要会话总结」），不得拿别项目的文档充当本会话依据。",
+    "【当前绑定会话】" + title + "（编号 " + key + "）。你现在的每一次审核、每一个判断、每一条下一步计划，都只针对这一个打开着的会话和它自己的 .guardian/sessions/" + key + "/ 目录。",
+    "硬规矩：",
+    "1) 只用本会话的材料（主任务输出 + 本会话目录里的 md）。材料里若混进别的项目、别的会话编号、别的 HANDOFF/源码路径，全部当不存在，忽略，不得拿它们当依据或写进计划。",
+    "2) 若本会话目录里还没有状态文件（SESSION-STATE.md / LATEST-CONTEXT.md），就输出「## 需要会话总结」让主会话把本会话状态写进它自己的工作区，绝不去读别项目的文档顶替。",
+    "3) 写下一步计划时，每条都要能对应回「这个会话正在做的事」，读起来像一个明白人跟同事说的活，不是术语堆砌。",
   ].join("\n");
+}
+
+// v2.1.2：管家窗口要给人看——去掉依据标记，只留「判断 / 要注意的问题 / 下一步建议」。
+// 依据仍完整写在管家日志（appendLog）里，窗口和计划板都不展示工程标记。
+function readableStewardReply(text) {
+  const raw = String(text || "").replace(/\r\n/g, "\n").trim();
+  if (!raw) return "";
+  const section = (title) => {
+    const re = new RegExp("(?:^|\\n)\\s*#{0,2}\\s*" + title + "[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*#{1,2}\\s|$)");
+    const m = raw.match(re);
+    return m ? m[1].trim() : "";
+  };
+  const clean = (body) => String(body || "")
+    .split("\n")
+    .map((line) => line
+      .replace(/【依据】[\s\S]*?→\s*/g, "")
+      .replace(/依据[:：][\s\S]*?→\s*/g, "")
+      .replace(/【(?:动作|验收)】/g, "")
+      .replace(/\s*→\s*/g, "，")
+      .trim())
+    .filter(Boolean)
+    .join("\n");
+  const parts = [];
+  const conclusion = clean(section("项目整体理解") || section("审核结论"));
+  if (conclusion) parts.push("【我的判断】\n" + conclusion);
+  const risks = clean(section("关键短板") || section("短板与风险"));
+  if (risks) parts.push("【要注意的问题】\n" + risks);
+  const plan = clean(section("下一步计划"));
+  if (plan) parts.push("【下一步建议】\n" + plan);
+  return parts.join("\n\n") || clean(raw);
 }
 
 function buildPrompt({ mainOutput, projectStatus, planEntries, mode, projectCtx, projectGoal, sessionIdentity, memoryKey }) {
@@ -809,10 +841,13 @@ function buildPrompt({ mainOutput, projectStatus, planEntries, mode, projectCtx,
     "按严重程度排序，最多 3 条。没有明显问题就写「无」。",
     "",
     "## 下一步计划",
-    "这是要直接写进【计划板】并自动发给 Codex 执行的指令，必须干净、可直接执行：",
+    "这是要直接写进【计划板】并自动发给 Codex 执行的指令。写给人看，也要能直接执行：",
+    "- 口语化：用日常说话的方式写，像跟同事交代任务，不要工程师黑话、不要缩写堆砌",
+    "- 每条让人一眼读懂三件事：要做什么、改哪个文件/模块、做完怎么算成（验收）",
+    "  示例写法：「把计划板倒计时的默认时间从 10 秒改成 30 秒，改 guardian.js 里的 planForThread，完成后点一下倒计时看是不是从 30 开始」",
     "- 不要出现「依据」「【依据】」「【动作】」「【验收】」等标记，不要复述证据",
-    "- 每条一行，动词开头，指明要改的文件/模块，自带验收判据",
     "- 3-5 条，按执行顺序编号",
+    "- 只针对「当前绑定会话」这一个会话，绝不引用、绝不规划其他会话或别的项目的内容",
     "- 每条都必须服务于本项目的最终设计目的，不许偏离项目框架去做无关的事",
     "- 禁止「继续优化」「进一步完善」这类空话",
     "",
@@ -1005,7 +1040,7 @@ async function tick(cdp) {
       sessionPromptBinding(sessionIdentity, memoryKey),
       `当前绑定会话：${sessionIdentity.sessionTitle}（${memoryKey}）`,
       "你是 Codex Guardian 的审核管家。用户在与你对话，可以纠正你的判断、补充信息、追问理由。",
-      "回答要求：简洁、直接、中文；涉及项目事实时优先引用下面材料中出现的内容；材料里确实没有就明确说没有，不要编。",
+      "回答要求：口语化、简洁、直接、中文，像跟同事说话那样；涉及项目事实时优先引用下面材料中出现的内容；只谈本会话相关的事，材料里确实没有就明确说没有，不要编，不要扯到别的项目或别的会话。",
       "",
       "【项目上下文】",
       ctxPart,
@@ -1162,9 +1197,10 @@ async function tick(cdp) {
     // v1.9.5：格式异常自动重试一次（更严格的 prompt），失败才写错误日志
     log("回复无可解析段落，尝试重试一次（严格格式）");
     const strictPrompt =
+      sessionPromptBinding(sessionIdentity, memoryKey) + "\n\n" +
       "你上一轮回复没有按要求分段。请只输出下面两段，不要任何前言/解释/代码块：\n" +
-      "## 关键短板\n<1-3 条，无则写「无」>\n" +
-      "## 下一步计划\n<3-5 条，动词开头，指明文件，可验证>";
+      "## 关键短板\n<最多 3 条，每条写清楚问题是什么、会影响什么，无则写「无」>\n" +
+      "## 下一步计划\n<3-5 条，用大白话写清楚：要做什么、动哪个文件/模块、做完怎么检查算成>";
     let retryReply = "";
     try {
       retryReply = await callLlm(s, strictPrompt + "\n\n原始任务输出摘要：\n" + String(reviewSourceText || "").slice(0, 5000));
@@ -1195,9 +1231,10 @@ async function tick(cdp) {
     let strictReply = "";
     try {
       strictReply = await callLlm(s,
+        sessionPromptBinding(sessionIdentity, memoryKey) + "\n\n" +
         "你上一条回复没有给出依据。请重新输出，只输出下面格式，每条必须带【依据】：\n" +
         "## 关键短板\n1. 【依据】<具体文件/函数/日志片段> → 【问题】<...>\n" +
-        "## 下一步计划\n1. 【依据】<...> → 【动作】<...> → 【验收】<...>");
+        "## 下一步计划\n1. 【依据】<...> → 【动作】<做什么，用大白话> → 【验收】<做完怎么检查>");
     } catch (e3) {
       await appendLog(cdp, "err", "依据重试失败：" + e3.message, { tag: errorTag(e3.message), mode });
       return;
@@ -1248,11 +1285,12 @@ async function tick(cdp) {
     await appendLog(cdp, "err", "计划质量闸门拦截：" + reasonText, { tag: "plan-quality", mode, reasons: quality.reasons, plan: String(parsed.nextPlan || "").slice(0, 300) });
     const anchors = (quality.anchors || []).slice(0, 8);
     const qualityPrompt = [
+      sessionPromptBinding(sessionIdentity, memoryKey),
       PLAN_QUALITY_RULES,
       "你上一版下一步计划未通过可靠性检查：" + reasonText + "。",
       anchors.length ? "至少直接命中这些待修复锚点之一：" + anchors.join("、") : "材料没有可提取锚点时，也必须给出单一、可验证的交付动作。",
       "只输出：## 下一步计划",
-      "1. <直接交付的行为或修复>。验收：<可运行命令或可观察结果>",
+      "1. <用大白话说要做什么，点名文件/模块>。验收：<做完怎么检查，可运行的命令或可看到的结果>",
       "不得只写安装依赖、升级版本、搭脚手架、初始化环境；不得偏离主任务本轮输出。",
       "",
       "【主任务本轮输出】",
@@ -1312,7 +1350,7 @@ async function tick(cdp) {
     const g = window.__CODEX_429_GUARDIAN__;
     if (g && typeof g.applyStewardPlan === "function") {
       return JSON.stringify(g.applyStewardPlan(
-        { fixes: ${JSON.stringify(parsed.fixes || null)}, nextPlan: ${JSON.stringify(nextPlanText)}, label: ${JSON.stringify(type.planLabel || "下一步")}, threadId: ${JSON.stringify(planTid)}, sessionId: ${JSON.stringify(sessionIdentity.sessionId)}, sessionKey: ${JSON.stringify(memoryKey)}, sessionTitle: ${JSON.stringify(sessionIdentity.sessionTitle)}, summary: ${JSON.stringify(reply)} },
+        { fixes: ${JSON.stringify(parsed.fixes || null)}, nextPlan: ${JSON.stringify(nextPlanText)}, label: ${JSON.stringify(type.planLabel || "下一步")}, threadId: ${JSON.stringify(planTid)}, sessionId: ${JSON.stringify(sessionIdentity.sessionId)}, sessionKey: ${JSON.stringify(memoryKey)}, sessionTitle: ${JSON.stringify(sessionIdentity.sessionTitle)}, summary: ${JSON.stringify(readableStewardReply(reply))} },
         ${plan.delaySeconds || 10}
       ));
     }
@@ -1390,7 +1428,7 @@ async function main() {
   }
 }
 
-export { buildProjectContext, collectProjectDocs, collectReferencedMds, sessionDir, persistSessionMemory, buildPrompt, extractProjectGoal, textHash, errorTag };
+export { buildProjectContext, collectProjectDocs, collectReferencedMds, sessionDir, persistSessionMemory, buildPrompt, extractProjectGoal, textHash, errorTag, readableStewardReply, sessionPromptBinding };
 
 if (process.argv.includes("--once")) {
   (async () => {

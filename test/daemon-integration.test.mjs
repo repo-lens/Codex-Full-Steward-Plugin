@@ -10,7 +10,12 @@ import {
   persistSessionMemory,
   collectReferencedMds,
   buildPrompt,
+  sessionPromptBinding,
+  readableStewardReply,
 } from "../scripts/steward-daemon.mjs";
+
+const coreBinding = (title, key) => sessionPromptBinding({ sessionTitle: title, memoryKey: key }, key);
+const readableReply = (text) => readableStewardReply(text);
 
 // v2.1.1：会话绑定声明——每个 prompt 显式携带会话名+编号，且禁止跨会话/跨项目引用
 test("buildPrompt declares the bound session and forbids cross-session md references", () => {
@@ -26,7 +31,7 @@ test("buildPrompt declares the bound session and forbids cross-session md refere
   });
   assert.ok(prompt.includes("【当前绑定会话】onfuzz vs Infuse 对比（编号 s_aaaa）"), "missing session binding line");
   assert.ok(prompt.includes(".guardian/sessions/s_aaaa/"), "binding must name the session's own memory dir");
-  assert.ok(/禁止引用其他会话目录/.test(prompt), "missing cross-session ban");
+  assert.ok(/别的项目、别的会话编号/.test(prompt), "missing cross-session ban");
   assert.ok(prompt.indexOf("【当前绑定会话】") < prompt.indexOf("【主任务本轮输出】"), "binding must appear before the materials");
 });
 
@@ -34,6 +39,45 @@ test("buildPrompt without sessionIdentity still degrades gracefully", () => {
   const prompt = buildPrompt({ mainOutput: "输出", projectStatus: "s", planEntries: [], mode: "review", projectCtx: { ok: true, tree: "t", docs: [] }, projectGoal: "" });
   assert.ok(prompt.includes("【当前绑定会话】"));
   assert.ok(prompt.includes("未命名会话"));
+});
+
+// v2.1.2：指令必须口语化（普通人能读懂），且必须锁死当前会话
+test("buildPrompt: 下一步计划要求口语化，并给出可读示例", () => {
+  const prompt = buildPrompt({
+    mainOutput: "输出", projectStatus: "s", planEntries: [], mode: "review",
+    projectCtx: { ok: true, tree: "t", docs: [] }, projectGoal: "",
+    sessionIdentity: { sessionTitle: "会话A", memoryKey: "s_a" }, memoryKey: "s_a",
+  });
+  assert.ok(/口语化/.test(prompt), "计划段落必须要求口语化");
+  assert.ok(/不要工程师黑话/.test(prompt), "必须明确禁止黑话");
+  assert.ok(/要做什么、改哪个文件\/模块、做完怎么算成/.test(prompt), "必须要求三要素");
+  assert.ok(/默认时间从 10 秒改成 30 秒/.test(prompt), "必须给出可模仿的大白话示例");
+});
+
+test("sessionPromptBinding: 硬规矩含会话锁定、禁跨项目、缺文件走总结", () => {
+  const b = coreBinding("会话B", "s_b");
+  assert.ok(b.includes(".guardian/sessions/s_b/"), "必须点名本会话目录");
+  assert.ok(/别的项目、别的会话编号/.test(b), "必须禁跨项目/跨会话引用");
+  assert.ok(/## 需要会话总结/.test(b), "缺状态文件时必须走总结而不是借别项目文档");
+  assert.ok(!b.includes("s_c"), "不能泄露其他会话编号");
+});
+
+test("readableStewardReply: 窗口文本去掉依据标记，只留可读的问题与计划", () => {
+  const reply = [
+    "## 项目整体理解",
+    "这是一个 Codex 插件，由面板和守护进程组成。",
+    "## 关键短板",
+    "1. 【依据】guardian.js planForThread(436) → 问题：计划会串到别的会话 → 影响：指令跑错项目",
+    "## 下一步计划",
+    "1. 【依据】planForThread → 【动作】把计划板锁在当前会话 → 【验收】切换会话后看不到别人的计划",
+  ].join("\n");
+  const out = readableReply(reply);
+  assert.ok(out.includes("【我的判断】"));
+  assert.ok(out.includes("【要注意的问题】"));
+  assert.ok(out.includes("【下一步建议】"));
+  assert.ok(!/【依据】/.test(out), "窗口不能出现【依据】标记");
+  assert.ok(!/→/.test(out), "窗口不能出现依据箭头链");
+  assert.ok(out.includes("把计划板锁在当前会话"), "动作正文必须保留");
 });
 
 test("derivePolicyChecks passes verification only when observable verification exists", () => {

@@ -4,7 +4,7 @@
 >
 > A local-first AI task steward for Codex desktop: quality gates, model fallback, plan execution, verified delivery, conservative cleanup, and unattended review.
 
-[![Version](https://img.shields.io/badge/version-2.1.1-58c4dd)](#)
+[![Version](https://img.shields.io/badge/version-2.1.2-58c4dd)](#)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%2B%20Codex-7bd88f)](#)
 [![Tests](https://img.shields.io/badge/tests-145%20passing-7bd88f)](#verification)
 [![License](https://img.shields.io/badge/license-MIT-f2c94c)](LICENSE)
