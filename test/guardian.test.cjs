@@ -25,6 +25,8 @@ test("default settings: enabled, 1min delay, 5 max consecutive, background on, s
     llmFallbackEnabled: false,
     llmProxyPort: 8443,
     projectRoot: "",
+    projectRootBySession: {},
+    projectRootMigratedFor: "",
   });
   // stewardMode=off 且 steward=true 时，steward 仍为 true（mode 只影响审核侧重）
   assert.equal(core.normalizeSettings({ steward: true, stewardMode: "off" }).steward, true);
@@ -1186,4 +1188,30 @@ test("steward bootstrap instruction binds summary files to the current session f
   assert.match(guide, /\.guardian\/sessions\/s_abc/);
   assert.match(guide, /SESSION-STATE\.md/);
   assert.match(guide, /不得读取或改写其他会话目录/);
+});
+
+// ===== v2.1.3：项目目录按会话绑定（防跨项目串读）=====
+test("pickSessionProjectRoot: 只返回当前会话明确绑定的项目目录", () => {
+  const map = { "s_a": "/projects/A", "s_b": "/projects/B" };
+  assert.equal(core.pickSessionProjectRoot(map, "s_a"), "/projects/A");
+  assert.equal(core.pickSessionProjectRoot(map, "s_b"), "/projects/B");
+  assert.equal(core.pickSessionProjectRoot(map, "s_c"), "");
+});
+
+test("pickSessionProjectRoot: 没有绑定就返回空，绝不回落到别的会话目录", () => {
+  assert.equal(core.pickSessionProjectRoot({}, "s_a"), "");
+  assert.equal(core.pickSessionProjectRoot(null, "s_a"), "");
+  assert.equal(core.pickSessionProjectRoot({ "s_a": "   " }, "s_a"), "");
+  assert.equal(core.pickSessionProjectRoot({ "s_a": "/A" }, "s_b"), "");
+});
+
+test("normalizeSettings: 保留并清洗 projectRootBySession 与迁移标记", () => {
+  const s = core.normalizeSettings({
+    projectRoot: "/old",
+    projectRootBySession: { "s_a": " /projects/A ", "s_b": "", "s_c": 42 },
+    projectRootMigratedFor: "s_a",
+  });
+  assert.deepEqual(s.projectRootBySession, { "s_a": "/projects/A" });
+  assert.equal(s.projectRootMigratedFor, "s_a");
+  assert.equal(s.projectRoot, "/old");
 });

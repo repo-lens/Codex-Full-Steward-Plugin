@@ -959,7 +959,22 @@ async function tick(cdp) {
     sessionTitle: state.sessionTitle || "未命名会话",
   };
   const plan = state.plan?.[planTid] || { entries: [], index: 0, delaySeconds: 30 };
-  const projectRoot = String(s.projectRoot || "").trim();
+  // v2.1.3：项目目录按会话绑定，避免 A 项目目录被 B 会话沿用（串项目事故根因）。
+  const sessionRoots = (s.projectRootBySession && typeof s.projectRootBySession === "object") ? s.projectRootBySession : {};
+  const boundRoot = String(sessionRoots[memoryKey] || "").trim();
+  const hasAnySessionRoot = Object.keys(sessionRoots).some((k) => String(sessionRoots[k] || "").trim());
+  // 旧版全局目录只有在本目录下确实存在本会话自己的记忆文件夹时才采用，
+  // 以此证明「这个目录本来就是当前会话在用」，否则宁可留空也不跨项目读。
+  let legacyRoot = "";
+  if (!boundRoot && !hasAnySessionRoot) {
+    const candidate = String(s.projectRoot || "").trim();
+    if (candidate && memoryKey) {
+      try {
+        if (fs.statSync(sessionDir(candidate, memoryKey)).isDirectory()) legacyRoot = candidate;
+      } catch (_) { legacyRoot = ""; }
+    }
+  }
+  const projectRoot = boundRoot || legacyRoot;
   const reviewSourceText = reqText || state.lastText || "";
 
   if (projectRoot && (s.steward || s.stewardAuto) && memoryKey !== lastMemorySessionKey) {
@@ -1019,7 +1034,7 @@ async function tick(cdp) {
   if (reqChat) {
     const history = reqChat.history.slice(-10).map((m) => (m.role === "user" ? "用户：" : "管家：") + String(m.text || "")).join("\n");
     // v1.9.29：对话也要带真实项目上下文（目录树 + 文档摘要），否则无法解释代码细节
-    const chatRoot = String(s.projectRoot || "").trim();
+    const chatRoot = projectRoot; // v2.1.3：与本会话绑定目录一致，不再读全局值
     const chatTid = memoryKey;
     const chatCtx = buildProjectContextCached(chatRoot, reqChat.text, chatTid);
     if (chatRoot) persistSessionMemory({ projectRoot: chatRoot, identity: sessionIdentity, sourceText: reqChat.text, projectCtx: chatCtx, planEntries: plan.entries || [] });
@@ -1107,6 +1122,8 @@ async function tick(cdp) {
     log("项目上下文", projectCtx.ok
       ? `tree=${projectCtx.tree.split("\n").length}行 docs=${projectCtx.docs.length}个`
       : "不足：" + projectCtx.reason);
+  } else if (hasAnySessionRoot) {
+    log("本会话未绑定项目目录，已拒绝沿用其他会话的目录", { session: memoryKey });
   } else {
     log("未配置项目目录，管家只能基于会话文本归纳");
   }

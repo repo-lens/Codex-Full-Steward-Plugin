@@ -9,7 +9,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "2.1.2";
+  const VERSION = "2.1.3";
   const PRODUCT_NAME = "Codex Full Steward Plugin";
   const PRODUCT_TITLE = "Codex Full Steward";
   const PANEL_SECTION_ORDER = Object.freeze(["steward", "plan", "r429"]);
@@ -86,7 +86,19 @@
       llmFallbackEnabled: raw?.llmFallbackEnabled === true,
       llmProxyPort: [0, 57321, 8443, 8000, 8791, 8792, 9000, 9090].includes(raw?.llmProxyPort) ? raw.llmProxyPort : 8443,
       // 项目根目录：守护进程据此读取目录结构 / README / HANDOFF.md 等，建立整体理解
+      // v2.1.3：按会话绑定，避免 A 项目设置的目录被 B 会话沿用而串项目
       projectRoot: typeof raw?.projectRoot === "string" ? raw.projectRoot : "",
+      projectRootBySession: (() => {
+        const src = raw?.projectRootBySession;
+        const out = {};
+        if (src && typeof src === "object" && !Array.isArray(src)) {
+          for (const [k, v] of Object.entries(src)) {
+            if (k && typeof v === "string" && v.trim()) out[k] = v.trim();
+          }
+        }
+        return out;
+      })(),
+      projectRootMigratedFor: typeof raw?.projectRootMigratedFor === "string" ? raw.projectRootMigratedFor : "",
     };
   }
 
@@ -1005,6 +1017,7 @@
     preferredPlanThreadId,
     normalizeSessionIdentity,
     buildStewardSessionBootstrap,
+    pickSessionProjectRoot,
     COLLAPSE_DEFAULTS,
     resolveCollapseState,
     toggleCollapse,
@@ -1240,8 +1253,17 @@
   }
 
   // v1.9.16：会话隔离 key——用「首条消息」指纹，保证同一项目下不同对话互不串台。
+  // v2.1.3：只取本会话自己明确绑定的项目目录。旧版全局目录不再自动复用，
+  // 否则 A 项目目录会被 B 会话顺手拿去读目录树和 HANDOFF（串项目事故根因）。
+  function pickSessionProjectRoot(bySession, sessionKey) {
+    const map = bySession && typeof bySession === "object" && !Array.isArray(bySession) ? bySession : {};
+    const key = String(sessionKey || "").trim();
+    if (key && typeof map[key] === "string" && map[key].trim()) return map[key].trim();
+    return "";
+  }
+
   function computeSessionKey(opts = {}) {
-    // v2.1.2：优先复用 currentThreadId() 的完整结果（显式 id / annotation / 内容指纹），
+    // v2.1.3：优先复用 currentThreadId() 的完整结果（显式 id / annotation / 内容指纹），
     // 保证「计划桶 key」与「会话记忆目录 key」同源，不再分叉；
     // opts.sharedThreadId 供纯函数单测注入（DOM 不存在时也能验证同源逻辑）。
     const shared = (typeof opts.sharedThreadId === "string" && opts.sharedThreadId)
@@ -1305,6 +1327,21 @@
     });
   }
 
+  function sessionProjectRoot(settings = runtime.settings) {
+    const identity = currentSessionIdentity();
+    return pickSessionProjectRoot(settings?.projectRootBySession, identity.memoryKey);
+  }
+
+  function bindProjectRootToSession(root, identity = currentSessionIdentity()) {
+    const key = identity.memoryKey;
+    if (!key) return null;
+    const value = String(root || "").trim();
+    const map = { ...(runtime.settings.projectRootBySession || {}) };
+    if (value) map[key] = value; else delete map[key];
+    setSettings({ ...runtime.settings, projectRootBySession: map });
+    return key;
+  }
+
   function currentSessionSnapshot() {
     const planThreadId = currentThreadId();
     const identity = currentSessionIdentity();
@@ -1320,6 +1357,7 @@
       lastText: String(turn.turnText || ""),
       hasStop: Boolean(signals.hasStopButton),
       taskStatus: signals.taskStatus,
+      projectRoot: sessionProjectRoot(),
     };
   }
 
@@ -2338,15 +2376,16 @@
   }
 
   function ensureStewardSessionBootstrap() {
-    if (!runtime.settings.steward || !runtime.settings.projectRoot) return null;
     const identity = currentSessionIdentity();
+    const boundRoot = sessionProjectRoot();
+    if (!runtime.settings.steward || !boundRoot) return null;
     if (!identity.memoryKey) return null;
     let seen = {};
     try { seen = JSON.parse(localStorage.getItem(STEWARD_BOOTSTRAP_KEY) || "{}") || {}; } catch (_) { seen = {}; }
-    const marker = `${runtime.settings.projectRoot}::${identity.memoryKey}`;
+    const marker = `${boundRoot}::${identity.memoryKey}`;
     if (seen[marker]) return null;
     const text = buildStewardSessionBootstrap({
-      projectRoot: runtime.settings.projectRoot,
+      projectRoot: boundRoot,
       sessionTitle: identity.sessionTitle,
       sessionId: identity.sessionId,
       memoryKey: identity.memoryKey,
@@ -3199,7 +3238,8 @@
     add("LLM 配置", hasKey && hasModel, hasKey && hasModel ? runtime.settings.llmModel : "缺 Key 或模型");
 
     // 3. 项目目录
-    add("项目目录", Boolean(runtime.settings.projectRoot), runtime.settings.projectRoot || "未填写");
+    const boundProjectRoot = sessionProjectRoot();
+    add("项目目录", Boolean(boundProjectRoot), boundProjectRoot || "本会话未绑定（请在下方填写）");
 
     // 4. 守护进程活跃：近 10 分钟内有过日志，或请求未被滞留
     const logList = readLog();
@@ -4061,7 +4101,7 @@
     if (planBadge2) planBadge2.textContent = `${doneCount}/${total}`;
     const onboardEl = host.querySelector(SELECTORS.ui.onboard);
     if (onboardEl) {
-      const configured = Boolean(runtime.settings.llmModel && runtime.settings.projectRoot && (runtime.deliveryState?.credentialStatus?.primary || runtime.settings.llmProvider === "ollama"));
+      const configured = Boolean(runtime.settings.llmModel && sessionProjectRoot() && (runtime.deliveryState?.credentialStatus?.primary || runtime.settings.llmProvider === "ollama"));
       onboardEl.hidden = configured;
     }
     if (stewardBadge) {
@@ -4609,7 +4649,7 @@
       llmKeychainStatus.style.color = configured ? "#6fc99a" : "#8b98a8";
     }
     if (llmProxyInput && document.activeElement !== llmProxyInput) llmProxyInput.value = runtime.settings.llmProxyPort || "";
-    if (projectRootInput && document.activeElement !== projectRootInput) projectRootInput.value = runtime.settings.projectRoot || "";
+    if (projectRootInput && document.activeElement !== projectRootInput) projectRootInput.value = sessionProjectRoot() || "";
     llmProviderButtons.forEach((btn) => {
       const on = btn.dataset.provider === runtime.settings.llmProvider;
       btn.classList.toggle("active", on);
@@ -4680,7 +4720,13 @@
   llmProxyInput.addEventListener("input", saveLlmProxy);
   llmProxyInput.addEventListener("change", saveLlmProxy);
   const saveProjectRoot = () => {
-    setSettings({ ...runtime.settings, projectRoot: projectRootInput.value.trim() });
+    const value = projectRootInput.value.trim();
+    const key = currentSessionIdentity().memoryKey;
+    const map = { ...(runtime.settings.projectRootBySession || {}) };
+    if (key) {
+      if (value) map[key] = value; else delete map[key];
+    }
+    setSettings({ ...runtime.settings, projectRoot: value, projectRootBySession: map });
   };
   projectRootInput.addEventListener("input", saveProjectRoot);
   projectRootInput.addEventListener("change", () => {
@@ -4742,6 +4788,8 @@
     getState: () => ({ ...runtime }),
     getSignals: () => currentSignals(),
     getSessionSnapshot: () => currentSessionSnapshot(),
+    getSessionProjectRoot: () => sessionProjectRoot(),
+    bindProjectRootToSession: (root) => bindProjectRootToSession(root),
     // 只读诊断：steward 闭环状态（供 CDP 探针/测试用）
     getStewardState: () => ({
       enabled: runtime.settings.steward,
